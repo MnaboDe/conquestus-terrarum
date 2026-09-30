@@ -9,6 +9,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConquestusTerrarum.Domain",
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConquestusTerrarum.Persistence", "src\ConquestusTerrarum.Persistence\ConquestusTerrarum.Persistence.csproj", "{5DCA527E-C13F-4CE2-B680-8A8943EC0E91}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ConquestusTerrarum.Domain.Tests", "tests\ConquestusTerrarum.Domain.Tests\ConquestusTerrarum.Domain.Tests.csproj", "{3DA2F61E-3846-4D40-A76D-86D53031C053}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -30,5 +32,9 @@ Global
 		{5DCA527E-C13F-4CE2-B680-8A8943EC0E91}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{5DCA527E-C13F-4CE2-B680-8A8943EC0E91}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{5DCA527E-C13F-4CE2-B680-8A8943EC0E91}.Release|Any CPU.Build.0 = Release|Any CPU
+		{3DA2F61E-3846-4D40-A76D-86D53031C053}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{3DA2F61E-3846-4D40-A76D-86D53031C053}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{3DA2F61E-3846-4D40-A76D-86D53031C053}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{3DA2F61E-3846-4D40-A76D-86D53031C053}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 EndGlobal
