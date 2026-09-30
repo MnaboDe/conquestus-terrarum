@@ -3,12 +3,14 @@
 public sealed class WorldState
 {
     private readonly Dictionary<Guid, Army> _armies;
+    private readonly Dictionary<Guid, Battle> _battles = new();
 
     public GameMap Map { get; }
 
     public DateTimeOffset CheckpointTime { get; private set; }
 
     public IReadOnlyCollection<Army> Armies => _armies.Values;
+    public IReadOnlyCollection<Battle> Battles => _battles.Values;
 
     public WorldState(
         GameMap map,
@@ -24,6 +26,7 @@ public sealed class WorldState
         _armies = armies.ToDictionary(army => army.Id);
 
         ValidateArmyLocations();
+        ReconcileAllBattles(checkpointTime);
     }
 
     public Army GetArmy(Guid armyId)
@@ -36,7 +39,13 @@ public sealed class WorldState
 
         return army;
     }
-    
+
+    public Battle? GetBattleAt(Guid locationId)
+    {
+        _battles.TryGetValue(locationId, out var battle);
+        return battle;
+    }
+
     public void StartMovement(
         Guid armyId,
         Guid destinationId,
@@ -48,7 +57,9 @@ public sealed class WorldState
                 "Command time cannot be before the world checkpoint.");
         }
 
-        WorldSimulator.AdvanceTo(this, commandTime);
+        WorldSimulator.AdvanceTo(
+            this,
+            commandTime);
 
         var army = GetArmy(armyId);
 
@@ -58,10 +69,18 @@ public sealed class WorldState
                 "Army is not currently located anywhere.");
         }
 
+        var originLocationId = army.LocationId.Value;
+
+        if (GetBattleAt(originLocationId) is not null)
+        {
+            throw new InvalidOperationException(
+                "Army cannot start normal movement while in battle.");
+        }
+
         Map.GetLocation(destinationId);
 
         var connection = Map.GetConnection(
-            army.LocationId.Value,
+            originLocationId,
             destinationId);
 
         army.StartMovement(
@@ -69,9 +88,52 @@ public sealed class WorldState
             commandTime);
     }
 
-    internal void SetCheckpointTime(DateTimeOffset checkpointTime)
+    internal void SetCheckpointTime(
+        DateTimeOffset checkpointTime)
     {
         CheckpointTime = checkpointTime;
+    }
+
+    internal void ReconcileBattleAt(
+        Guid locationId,
+        DateTimeOffset logicalTime)
+    {
+        Map.GetLocation(locationId);
+
+        var ownerCount = _armies.Values
+            .Where(army => army.LocationId == locationId)
+            .Select(army => army.OwnerId)
+            .Distinct()
+            .Take(2)
+            .Count();
+
+        var hasEnemies = ownerCount >= 2;
+
+        if (hasEnemies)
+        {
+            if (!_battles.ContainsKey(locationId))
+            {
+                _battles[locationId] =
+                    new Battle(
+                        locationId,
+                        logicalTime);
+            }
+
+            return;
+        }
+
+        _battles.Remove(locationId);
+    }
+
+    private void ReconcileAllBattles(
+        DateTimeOffset logicalTime)
+    {
+        foreach (var location in Map.Locations)
+        {
+            ReconcileBattleAt(
+                location.Id,
+                logicalTime);
+        }
     }
 
     private void ValidateArmyLocations()
@@ -85,8 +147,11 @@ public sealed class WorldState
 
             if (army.Movement is { } movement)
             {
-                Map.GetLocation(movement.FromLocationId);
-                Map.GetLocation(movement.ToLocationId);
+                Map.GetLocation(
+                    movement.FromLocationId);
+
+                Map.GetLocation(
+                    movement.ToLocationId);
             }
         }
     }

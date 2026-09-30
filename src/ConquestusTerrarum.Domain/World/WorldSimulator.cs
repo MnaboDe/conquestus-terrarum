@@ -22,7 +22,8 @@ public static class WorldSimulator
                 .Where(army =>
                     army.Movement is not null &&
                     army.Movement.ArriveAt <= targetTime)
-                .OrderBy(army => army.Movement!.ArriveAt)
+                .OrderBy(army =>
+                    army.Movement!.ArriveAt)
                 .FirstOrDefault();
 
             if (nextArmyToArrive is null)
@@ -37,11 +38,28 @@ public static class WorldSimulator
                     army.Movement.ArriveAt == eventTime)
                 .ToArray();
 
-            // Все прибытия с одинаковым logical time
-            // применяются одним batch.
+            // Важно: сначала запоминаем все destinations,
+            // пока Movement ещё существует.
+            var affectedLocations = arrivingArmies
+                .Select(army =>
+                    army.Movement!.ToLocationId)
+                .Distinct()
+                .ToArray();
+
+            // Все движения с одинаковым logical time
+            // завершаются как один batch.
             foreach (var army in arrivingArmies)
             {
                 army.CompleteMovement();
+            }
+
+            // И только после завершения всего batch
+            // определяем, возникли ли бои.
+            foreach (var locationId in affectedLocations)
+            {
+                world.ReconcileBattleAt(
+                    locationId,
+                    eventTime);
             }
 
             world.SetCheckpointTime(eventTime);
@@ -56,7 +74,8 @@ public static class WorldSimulator
         var staleArmy = world.Armies.FirstOrDefault(
             army =>
                 army.Movement is not null &&
-                army.Movement.ArriveAt < world.CheckpointTime);
+                army.Movement.ArriveAt <
+                world.CheckpointTime);
 
         if (staleArmy is not null)
         {
