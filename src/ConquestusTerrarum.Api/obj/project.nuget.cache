@@ -1,0 +1,11 @@
+{
+  "version": 2,
+  "dgSpecHash": "cCIdpVXwP+M=",
+  "success": true,
+  "projectFilePath": "C:\\Users\\marin\\Projects\\ConquestusTerrarum\\src\\ConquestusTerrarum.Api\\ConquestusTerrarum.Api.csproj",
+  "expectedPackageFiles": [
+    "C:\\Users\\marin\\.nuget\\packages\\microsoft.aspnetcore.openapi\\10.0.11\\microsoft.aspnetcore.openapi.10.0.11.nupkg.sha512",
+    "C:\\Users\\marin\\.nuget\\packages\\microsoft.openapi\\2.7.5\\microsoft.openapi.2.7.5.nupkg.sha512"
+  ],
+  "logs": []
+}

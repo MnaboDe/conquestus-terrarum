@@ -1,0 +1,23 @@
+{
+  "runtimeTarget": {
+    "name": ".NETCoreApp,Version=v10.0",
+    "signature": ""
+  },
+  "compilationOptions": {},
+  "targets": {
+    ".NETCoreApp,Version=v10.0": {
+      "ConquestusTerrarum.Domain/1.0.0": {
+        "runtime": {
+          "ConquestusTerrarum.Domain.dll": {}
+        }
+      }
+    }
+  },
+  "libraries": {
+    "ConquestusTerrarum.Domain/1.0.0": {
+      "type": "project",
+      "serviceable": false,
+      "sha512": ""
+    }
+  }
+}

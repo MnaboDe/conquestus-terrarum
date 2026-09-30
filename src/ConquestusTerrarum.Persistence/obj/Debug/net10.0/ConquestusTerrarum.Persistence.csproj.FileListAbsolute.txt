@@ -1,0 +1,15 @@
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\bin\Debug\net10.0\ConquestusTerrarum.Persistence.deps.json
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\bin\Debug\net10.0\ConquestusTerrarum.Persistence.dll
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\bin\Debug\net10.0\ConquestusTerrarum.Persistence.pdb
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\bin\Debug\net10.0\ConquestusTerrarum.Domain.dll
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\bin\Debug\net10.0\ConquestusTerrarum.Domain.pdb
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.csproj.AssemblyReference.cache
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.GeneratedMSBuildEditorConfig.editorconfig
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.AssemblyInfoInputs.cache
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.AssemblyInfo.cs
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.csproj.CoreCompileInputs.cache
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\Conquest.91DCB135.Up2Date
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.dll
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\refint\ConquestusTerrarum.Persistence.dll
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ConquestusTerrarum.Persistence.pdb
+C:\Users\marin\Projects\ConquestusTerrarum\src\ConquestusTerrarum.Persistence\obj\Debug\net10.0\ref\ConquestusTerrarum.Persistence.dll
