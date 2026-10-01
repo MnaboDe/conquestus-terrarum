@@ -38,6 +38,7 @@ public sealed class WorldState
             ?? new List<PlayerAlliance>();
 
         ValidateArmyLocations();
+        InitializeArmyEntryTimes();
 
         ReconcileAllBattles(
             checkpointTime);
@@ -142,13 +143,16 @@ public sealed class WorldState
         Guid locationId,
         DateTimeOffset logicalTime)
     {
-        Map.GetLocation(
-            locationId);
+        var location =
+            Map.GetLocation(locationId);
 
         var armiesAtLocation = _armies.Values
             .Where(army =>
                 army.LocationId == locationId)
             .ToArray();
+
+        var hadBattle =
+            _battles.ContainsKey(locationId);
 
         var hasHostilePair =
             HasHostilePair(
@@ -156,7 +160,7 @@ public sealed class WorldState
 
         if (hasHostilePair)
         {
-            if (!_battles.ContainsKey(locationId))
+            if (!hadBattle)
             {
                 _battles[locationId] =
                     new Battle(
@@ -164,11 +168,120 @@ public sealed class WorldState
                         logicalTime);
             }
 
+            foreach (var army in armiesAtLocation)
+            {
+                army.EnterBattle();
+            }
+
             return;
         }
 
-        _battles.Remove(
-            locationId);
+        if (!hadBattle)
+            return;
+
+        _battles.Remove(locationId);
+
+        foreach (var army in armiesAtLocation)
+        {
+            army.LeaveBattle();
+        }
+
+        ResolveOwnerAfterBattle(
+            location,
+            armiesAtLocation);
+    }
+    
+    private static void ResolveOwnerAfterBattle(
+        Location location,
+        IReadOnlyCollection<Army> survivingArmies)
+    {
+        var armiesWithEntryTime =
+            survivingArmies
+                .Where(army =>
+                    army.EnteredLocationAt is not null)
+                .ToArray();
+
+        if (armiesWithEntryTime.Length == 0)
+        {
+            return;
+        }
+
+        var earliestEntryTime =
+            armiesWithEntryTime
+                .Min(army =>
+                    army.EnteredLocationAt!.Value);
+
+        var earliestOwners =
+            armiesWithEntryTime
+                .Where(army =>
+                    army.EnteredLocationAt ==
+                    earliestEntryTime)
+                .Select(army => army.OwnerId)
+                .Distinct()
+                .ToArray();
+
+        if (earliestOwners.Length == 1)
+        {
+            location.ChangeOwner(
+                earliestOwners[0]);
+
+            return;
+        }
+
+        // Два разных союзника прибыли абсолютно одновременно.
+        // Пока у нас нет gameplay-rule для такого tie,
+        // поэтому не отдаём клетку случайно одному из них.
+        location.ChangeOwner(null);
+    }
+    
+    public void Retreat(
+        Guid armyId,
+        DateTimeOffset commandTime)
+    {
+        if (commandTime < CheckpointTime)
+        {
+            throw new InvalidOperationException(
+                "Command time cannot be before the world checkpoint.");
+        }
+
+        WorldSimulator.AdvanceTo(
+            this,
+            commandTime);
+
+        var army =
+            GetArmy(armyId);
+
+        if (!army.CanRetreat)
+        {
+            throw new InvalidOperationException(
+                "Army cannot retreat from the current battle.");
+        }
+
+        if (army.LocationId is null ||
+            army.RetreatLocationId is null)
+        {
+            throw new InvalidOperationException(
+                "Army has no retreat destination.");
+        }
+
+        var battleLocationId =
+            army.LocationId.Value;
+
+        var retreatLocationId =
+            army.RetreatLocationId.Value;
+
+        var connection =
+            Map.GetConnection(
+                battleLocationId,
+                retreatLocationId);
+
+        army.StartRetreat(
+            connection,
+            commandTime);
+
+        ReconcileBattleAt(
+            battleLocationId,
+            commandTime);
     }
 
     private bool HasHostilePair(
@@ -229,6 +342,15 @@ public sealed class WorldState
                 Map.GetLocation(
                     movement.ToLocationId);
             }
+        }
+    }
+    
+    private void InitializeArmyEntryTimes()
+    {
+        foreach (var army in _armies.Values)
+        {
+            army.InitializeLocationEntryTime(
+                CheckpointTime);
         }
     }
 }

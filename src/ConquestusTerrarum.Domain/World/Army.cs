@@ -8,6 +8,8 @@ public sealed class Army
     public Guid OwnerId { get; }
 
     public Guid? LocationId { get; private set; }
+    
+    public DateTimeOffset? EnteredLocationAt { get; private set; }
 
     public Guid? PreviousLocationId { get; private set; }
 
@@ -89,6 +91,7 @@ public sealed class Army
             connection.TravelTime,
             MovementKind.Normal);
 
+        EnteredLocationAt = null;
         LocationId = null;
     }
 
@@ -129,6 +132,7 @@ public sealed class Army
             connection.TravelTime,
             MovementKind.Retreat);
 
+        EnteredLocationAt = null;
         LocationId = null;
 
         // После retreat нельзя сразу retreat ещё раз,
@@ -155,17 +159,17 @@ public sealed class Army
         LocationId =
             completedMovement.ToLocationId;
 
+        EnteredLocationAt =
+            completedMovement.ArriveAt;
+
         if (completedMovement.Kind ==
             MovementKind.Normal)
         {
-            // Нормальное перемещение снова разрешает
-            // будущий retreat.
             _retreatLocked = false;
         }
 
         Movement = null;
     }
-
     internal void EnterBattle()
     {
         if (IsInBattle)
@@ -177,6 +181,16 @@ public sealed class Army
             _retreatLocked
                 ? null
                 : PreviousLocationId;
+    }
+    
+    internal void InitializeLocationEntryTime(
+        DateTimeOffset enteredAt)
+    {
+        if (LocationId is not null &&
+            EnteredLocationAt is null)
+        {
+            EnteredLocationAt = enteredAt;
+        }
     }
 
     internal void LeaveBattle()
