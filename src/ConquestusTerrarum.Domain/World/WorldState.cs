@@ -115,7 +115,7 @@ public sealed class WorldState
         var originLocationId =
             army.LocationId.Value;
 
-        if (GetBattleAt(originLocationId) is not null)
+        if (army.IsInBattle)
         {
             throw new InvalidOperationException(
                 "Army cannot start normal movement while in battle.");
@@ -170,14 +170,30 @@ public sealed class WorldState
 
             foreach (var army in armiesAtLocation)
             {
-                army.EnterBattle();
+                if (HasHostileArmy(
+                        army,
+                        armiesAtLocation))
+                {
+                    army.EnterBattle();
+                }
+                else
+                {
+                    army.LeaveBattle();
+                }
             }
 
             return;
         }
 
         if (!hadBattle)
+        {
+            foreach (var army in armiesAtLocation)
+            {
+                army.LeaveBattle();
+            }
+
             return;
+        }
 
         _battles.Remove(locationId);
 
@@ -352,5 +368,17 @@ public sealed class WorldState
             army.InitializeLocationEntryTime(
                 CheckpointTime);
         }
+    }
+    
+    private bool HasHostileArmy(
+        Army army,
+        IReadOnlyCollection<Army> armiesAtLocation)
+    {
+        return armiesAtLocation.Any(
+            otherArmy =>
+                otherArmy.Id != army.Id &&
+                AreHostile(
+                    army.OwnerId,
+                    otherArmy.OwnerId));
     }
 }
