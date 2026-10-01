@@ -8,7 +8,7 @@ namespace ConquestusTerrarum.Persistence;
 public sealed record MatchExecutionResult<T>(T Value, long Version, DateTimeOffset DatabaseTime);
 
 /// <summary>One row and one transaction per match. The caller owns the reusable data source.</summary>
-public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource)
+public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatchRepository
 {
     private readonly WorldSnapshotSerializer _serializer = new();
 
