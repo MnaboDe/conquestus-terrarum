@@ -1,6 +1,24 @@
-@ConquestusTerrarum.Api_HostAddress = http://localhost:5108
+@host = http://localhost:5108
+# Replace IDs using the development creation response.
+@matchId = 00000000-0000-0000-0000-000000000000
+@armyId = 00000000-0000-0000-0000-000000000000
+@destinationLocationId = 00000000-0000-0000-0000-000000000000
 
-GET {{ConquestusTerrarum.Api_HostAddress}}/weatherforecast/
-Accept: application/json
+POST {{host}}/api/v1/dev/matches
 
 ###
+GET {{host}}/api/v1/matches/{{matchId}}
+
+###
+POST {{host}}/api/v1/matches/{{matchId}}/armies/{{armyId}}/move
+Content-Type: application/json
+
+{
+  "destinationLocationId": "{{destinationLocationId}}"
+}
+
+###
+POST {{host}}/api/v1/matches/{{matchId}}/armies/{{armyId}}/retreat
+
+###
+GET {{host}}/openapi/v1.json

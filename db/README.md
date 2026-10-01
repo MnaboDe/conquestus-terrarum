@@ -13,7 +13,8 @@ dotnet run --project tools/ConquestusTerrarum.Migrations
 Compose uses the official `postgres:17-alpine` image, a named data volume, and port
 5432 bound to localhost. These credentials are **local development only**. Supply
 production configuration outside source control. `docker compose stop` stops the
-server while retaining data. There are no API endpoints or automatic startup workers.
+server while retaining data. See the [API guide](../src/ConquestusTerrarum.Api/README.md)
+for HTTP client setup. There are no automatic startup workers.
 
 The CLI calls `PostgresMigrator.MigrateAsync()`. SQL files in `db/migrations` are
 embedded in Persistence. A transaction-level advisory lock serializes migrators;
