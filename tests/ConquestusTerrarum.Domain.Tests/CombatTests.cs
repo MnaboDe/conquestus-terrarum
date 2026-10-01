@@ -452,4 +452,69 @@ public class CombatTests
         WorldSimulator.AdvanceTo(world, DateTimeOffset.MaxValue);
         Assert.True(a.IsAlive); Assert.True(b.IsAlive);
     }
+
+    [Fact]
+    public void DifferentMathematicalDeathsWithinSameTick_ResolveSimultaneously()
+    {
+        // With 1 HP/s incoming damage, these death times are 150 ns and 180 ns.
+        // The MVP rounds both up to tick 2 (200 ns), with no sub-tick winner.
+        var a = Unit(101, 0.00000015m, 1);
+        var b = Unit(102, 0.00000018m, 1);
+        var world = World([Army(11, 21, 1, a), Army(12, 22, 1, b)]);
+        var slot = Assert.Single(world.Battles.Single().Slots);
+        Assert.NotEqual(a.CurrentHitPoints / b.DamagePerSecond, b.CurrentHitPoints / a.DamagePerSecond);
+        Assert.Equal(Start.AddTicks(2), slot.FirstDeathAt);
+        Assert.Equal(Start.AddTicks(2), slot.SecondDeathAt);
+
+        WorldSimulator.AdvanceTo(world, Start.AddTicks(1));
+        Assert.Equal(0.00000005m, a.CurrentHitPoints);
+        Assert.Equal(0.00000008m, b.CurrentHitPoints);
+        Assert.All(world.Armies, army => Assert.False(army.IsDestroyed));
+
+        WorldSimulator.AdvanceTo(world, Start.AddTicks(2));
+        Assert.Equal(0m, a.CurrentHitPoints);
+        Assert.Equal(0m, b.CurrentHitPoints);
+        Assert.All(world.Armies, army => Assert.True(army.IsDestroyed));
+        Assert.Empty(world.Battles);
+    }
+
+    [Fact]
+    public void DeathExactlyOnTick_IsNotDelayedToFollowingTick()
+    {
+        var a = Unit(101, 0.0000001m, 0);
+        var b = Unit(102, 1, 1);
+        var world = World([Army(11, 21, 1, a), Army(12, 22, 1, b)]);
+        Assert.Equal(Start.AddTicks(1), world.Battles.Single().Slots.Single().NextDeathAt);
+        WorldSimulator.AdvanceTo(world, Start);
+        Assert.True(a.IsAlive);
+        WorldSimulator.AdvanceTo(world, Start.AddTicks(1));
+        Assert.False(a.IsAlive);
+        Assert.Equal(1m, b.CurrentHitPoints); // Zero DPS does no damage.
+        Assert.Empty(world.Battles);
+    }
+
+    [Fact]
+    public void MinimumHpAgainstMaximumDps_ResolvesAtFirstTickWithoutOverflow()
+    {
+        var a = Unit(101, 0.0000000000000000000000000001m, 0);
+        var b = Unit(102, decimal.MaxValue, decimal.MaxValue);
+        var world = World([Army(11, 21, 1, a), Army(12, 22, 1, b)]);
+        Assert.Equal(Start.AddTicks(1), world.Battles.Single().Slots.Single().NextDeathAt);
+        WorldSimulator.AdvanceTo(world, Start.AddTicks(1));
+        Assert.False(a.IsAlive);
+        Assert.Equal(decimal.MaxValue, b.CurrentHitPoints);
+    }
+
+    [Fact]
+    public void MutualAnnihilation_ProvisionallyLeavesExistingOwnerUnchanged()
+    {
+        var location = new Location(Id(1), "Battlefield", Id(99));
+        var world = new WorldState(new GameMap([location], []),
+            [Army(11, 21, 1, Unit(101)), Army(12, 22, 1, Unit(102))], Start);
+        Advance(world, 10);
+        Assert.All(world.Armies, army => Assert.True(army.IsDestroyed));
+        Assert.Empty(world.Battles);
+        // Regression coverage for current behavior; the gameplay rule is unresolved.
+        Assert.Equal(Id(99), location.OwnerId);
+    }
 }

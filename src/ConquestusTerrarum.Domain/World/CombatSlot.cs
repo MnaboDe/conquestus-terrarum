@@ -69,7 +69,9 @@ public sealed class CombatSlot
         var (dpsValue, dpsScale) = DecimalParts(dps);
         var numerator = hpValue * BigInteger.Pow(10, dpsScale) * TimeSpan.TicksPerSecond;
         var denominator = dpsValue * BigInteger.Pow(10, hpScale);
-        // Exact integer ceiling: never schedule a death before the mathematical boundary.
+        // MVP minimum time resolution: one TimeSpan tick (100 ns).
+        // Exact integer ceiling never schedules death early. Distinct mathematical
+        // deaths rounding to the same representable tick resolve simultaneously.
         var ticks = (numerator + denominator - 1) / denominator;
         var remaining = (DateTimeOffset.MaxValue - start).Ticks;
         return ticks > remaining ? null : start.AddTicks((long)ticks);

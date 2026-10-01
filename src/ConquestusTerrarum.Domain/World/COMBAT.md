@@ -1,7 +1,8 @@
 # Domain combat MVP
 
 Simulation is lazy: WorldSimulator.AdvanceTo jumps to the earliest arrival, slot
-death, or requested target. There are no ticks or background services. All active
+death, or requested target. There are no fixed combat ticks or background services.
+All active
 battles share the same timeline.
 
 At each boundary T the simulator performs these phases:
@@ -36,16 +37,25 @@ explicit byte order, and UTC battle-start ticks.
 
 CombatSlot stores army/unit identities, pairing timestamp and starting HP. Damage
 is recomputed from these anchors, so checkpoint frequency cannot accumulate rounding
-error. Exact integer arithmetic on decimal coefficients determines time-to-death;
-a fractional tick rounds UP to the first representable DateTimeOffset tick. Deaths
-with equal representable timestamps resolve together. Positive HP rounds upward at
-decimal precision to avoid premature deaths; death timestamps remain authoritative.
+error. Exact integer arithmetic on decimal coefficients determines time-to-death.
+The minimum combat time resolution for this MVP is one TimeSpan tick (100 ns),
+matching DateTimeOffset. A fractional tick rounds UP to the first representable
+timestamp. Events resolving to the same representable tick are simultaneous,
+even when their mathematical death times differ. For example, deaths at 150 ns
+and 180 ns after pairing both resolve at 200 ns; both units deal damage through
+that boundary and die together. No sub-tick ordering or rational timestamp system
+is used. Positive HP rounds upward at decimal precision to avoid premature deaths; death timestamps remain authoritative.
 Zero DPS and deaths beyond the DateTimeOffset range have no scheduled boundary.
 
 The world checkpoint, units/HP, army movement/entry/retreat-lock state, active battle
 start/random state and slot anchors together describe what a future persistence
-adapter must restore. No persistence adapter or serialization framework is added.
+adapter must restore. Persistence is NOT implemented yet. Battle contains the state
+that will need to be persisted, but there is currently no rehydration API for
+restoring Battle.RandomState or active CombatSlots. No PostgreSQL integration,
+persistence adapter or serialization framework is implemented in this branch.
 
 After battle, the earliest surviving entry determines ownership. Equal earliest
 entries from different players leave OwnerId null. If there are no survivors, the
-existing location owner remains unchanged, preserving the previous ownership rule.
+existing location owner currently remains unchanged. This mutual-annihilation
+behavior is provisional: ownership when no armies survive is an unresolved
+gameplay rule, not a finalized decision.
