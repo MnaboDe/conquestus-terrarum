@@ -10,6 +10,14 @@ public sealed class MovementOrder
 
     public MovementKind Kind { get; }
 
+    private MovementOrder(MovementSnapshot s)
+        : this(s.FromLocationId, s.ToLocationId, s.StartedAt, s.ArriveAt - s.StartedAt, s.Kind)
+    {
+        ArriveAt = s.ArriveAt;
+    }
+
+    internal static MovementOrder Restore(MovementSnapshot snapshot) => new(snapshot);
+
     public MovementOrder(
         Guid fromLocationId,
         Guid toLocationId,

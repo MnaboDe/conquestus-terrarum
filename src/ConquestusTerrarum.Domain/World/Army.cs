@@ -1,6 +1,6 @@
 ﻿namespace ConquestusTerrarum.Domain.World;
 
-public sealed class Army
+public sealed partial class Army
 {
     private bool _retreatLocked;
     public IReadOnlyList<Unit> Units { get; }

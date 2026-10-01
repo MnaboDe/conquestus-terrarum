@@ -1,6 +1,6 @@
 ﻿namespace ConquestusTerrarum.Domain.World;
 
-public sealed class WorldState
+public sealed partial class WorldState
 {
     private readonly Dictionary<Guid, Army> _armies;
     private readonly Dictionary<Guid, Battle> _battles = new();
