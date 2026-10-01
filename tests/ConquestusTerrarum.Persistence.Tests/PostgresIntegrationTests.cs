@@ -265,4 +265,75 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         Assert.Equal(start.Ticks, saved.CheckpointTime.Ticks);
         Assert.Equal(start.AddTicks(17).Ticks, saved.Armies[0].Movement!.ArriveAt.Ticks);
     }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task FactoryCreationUsesOneDatabaseTimestampForInitialWorldAndMetadata()
+    {
+        var id = Guid.NewGuid();
+        DateTimeOffset captured = default;
+        WorldSnapshot initial = null!;
+        var calls = 0;
+        await using var clock = database.DataSource.CreateCommand("SELECT clock_timestamp()");
+        var before = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync())!);
+        await Repository.CreateAsync(id, databaseTime =>
+        {
+            captured = databaseTime;
+            calls++;
+            var world = new WorldState(new GameMap([new(Id(1), "Battlefield")], []),
+                [Army(11, 21, 1, Unit(101)), Army(12, 22, 1, Unit(102))], databaseTime);
+            initial = world.CreateSnapshot();
+            return world;
+        });
+        var after = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync())!);
+        Assert.Equal(1, calls);
+        Assert.InRange(captured, before, after);
+        var row = await Row(id);
+        var saved = _serializer.Deserialize(row.Json);
+        Assert.Equal(captured, saved.CheckpointTime);
+        Assert.Equal(captured, row.Created);
+        Assert.Equal(captured, row.Updated);
+        Assert.Equal(0, row.Version);
+        Assert.Equal(_serializer.Serialize(initial), _serializer.Serialize(saved));
+        Assert.All(saved.Armies, army => Assert.Equal(captured, army.EnteredLocationAt));
+        Assert.Equal(captured, saved.Battles.Single().StartedAt);
+
+        // The first read advances only elapsed database time from the factory checkpoint.
+        // There is no application-clock checkpoint to correct or reject.
+        var current = await Repository.LoadCurrentAsync(id);
+        Assert.True(current.DatabaseTime >= captured);
+        var expected = WorldState.Restore(initial);
+        WorldSimulator.AdvanceTo(expected, current.DatabaseTime);
+        Assert.Equal(_serializer.Serialize(expected.CreateSnapshot()), _serializer.Serialize(current.Value));
+        Assert.Equal(current.DatabaseTime, current.Value.CheckpointTime);
+        Assert.Equal(1, current.Version);
+        Assert.Equal(captured, (await Row(id)).Created);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task FactoryCheckpointMustEqualDatabaseTime_EvenWhenEarlier()
+    {
+        foreach (var offset in new[] { -1, 1 })
+        {
+            var id = Guid.NewGuid();
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.CreateAsync(id, time =>
+                new WorldState(new GameMap([new(Id(1), "Home")], []), [], time.AddTicks(offset))));
+            await Assert.ThrowsAsync<MatchNotFoundException>(() => Repository.LoadCurrentAsync(id));
+        }
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task FailedOrNullFactoryDoesNotCreateMatch()
+    {
+        var id = Guid.NewGuid();
+        var failure = new InvalidOperationException("Factory failed.");
+        Assert.Same(failure, await Assert.ThrowsAsync<InvalidOperationException>(() =>
+            Repository.CreateAsync(id, _ => throw failure)));
+        await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.CreateAsync(id, _ => null!));
+        await Assert.ThrowsAsync<MatchNotFoundException>(() => Repository.LoadCurrentAsync(id));
+        await Repository.CreateAsync(id, time => new WorldState(new GameMap([], []), [], time));
+        Assert.Equal(0, (await Row(id)).Version);
+    }
 }

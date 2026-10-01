@@ -12,9 +12,33 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource)
 {
     private readonly WorldSnapshotSerializer _serializer = new();
 
+    /// <summary>
+    /// Normal production creation: the factory constructs the world at the captured database time.
+    /// Keep the factory free of external side effects; failure aborts the transaction.
+    /// </summary>
+    public async Task CreateAsync(Guid matchId, Func<DateTimeOffset, WorldState> worldFactory,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMatchId(matchId);
+        ArgumentNullException.ThrowIfNull(worldFactory);
+        await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
+        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        var now = await ReadDatabaseTimeAsync(connection, transaction, cancellationToken);
+        var world = worldFactory(now) ?? throw new InvalidOperationException("The world factory returned null.");
+        if (world.CheckpointTime != now)
+            throw new InvalidOperationException("The world factory must use the captured database timestamp as its initial checkpoint.");
+        var json = _serializer.Serialize(world.CreateSnapshot());
+        await InsertAsync(connection, transaction, matchId, json, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    /// <summary>
+    /// Exact snapshot insertion for imports/tests. The supplied checkpoint is retained and must not
+    /// be ahead of database time. Use the factory overload for normal production match creation.
+    /// </summary>
     public async Task CreateAsync(Guid matchId, WorldState initialWorld, CancellationToken cancellationToken = default)
     {
-        if (matchId == Guid.Empty) throw new ArgumentException("Match id cannot be empty.", nameof(matchId));
+        ValidateMatchId(matchId);
         ArgumentNullException.ThrowIfNull(initialWorld);
         var snapshot = initialWorld.CreateSnapshot();
         var json = _serializer.Serialize(snapshot);
@@ -22,16 +46,21 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource)
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         var now = await ReadDatabaseTimeAsync(connection, transaction, cancellationToken);
         EnsureTimeIsNotBehind(now, snapshot.CheckpointTime);
-        // Creation stores the supplied initial checkpoint exactly; the first current read advances it.
+        await InsertAsync(connection, transaction, matchId, json, now, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    private static async Task InsertAsync(NpgsqlConnection connection, NpgsqlTransaction transaction,
+        Guid matchId, string json, DateTimeOffset databaseTime, CancellationToken cancellationToken)
+    {
         await using var command = new NpgsqlCommand("""
             INSERT INTO matches (id, state, version, created_at, updated_at)
             VALUES ($1, $2, 0, $3, $3)
             """, connection, transaction);
         command.Parameters.AddWithValue(matchId);
         command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, json);
-        command.Parameters.AddWithValue(now);
+        command.Parameters.AddWithValue(databaseTime);
         await command.ExecuteNonQueryAsync(cancellationToken);
-        await transaction.CommitAsync(cancellationToken);
     }
 
     /// <summary>Current reads also lock, advance, save, and increment the version.</summary>
@@ -46,6 +75,7 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource)
     public async Task<MatchExecutionResult<T>> ExecuteAsync<T>(Guid matchId,
         Func<WorldState, DateTimeOffset, Task<T>> operation, CancellationToken cancellationToken = default)
     {
+        ValidateMatchId(matchId);
         ArgumentNullException.ThrowIfNull(operation);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
         await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
@@ -81,6 +111,11 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource)
         }
         await transaction.CommitAsync(cancellationToken);
         return new(result, nextVersion, now);
+    }
+
+    private static void ValidateMatchId(Guid matchId)
+    {
+        if (matchId == Guid.Empty) throw new ArgumentException("Match id cannot be empty.", nameof(matchId));
     }
 
     private static void EnsureTimeIsNotBehind(DateTimeOffset now, DateTimeOffset checkpoint)

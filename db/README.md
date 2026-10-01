@@ -52,9 +52,23 @@ consistent command/event checkpoint, not a partially applied event phase.
 ## Repository and time
 
 Construct a reusable caller-owned `NpgsqlDataSource` and pass it to
-`PostgresMatchRepository`. `CreateAsync(matchId, initialWorld)` stores the supplied
-initial snapshot exactly, with version 0 and DB-generated creation/update time.
-Its checkpoint must not be ahead of the database clock. Matchmaking is not included.
+`PostgresMatchRepository`. The **normal production match-creation path** is
+`CreateAsync(matchId, databaseTime => new WorldState(map, armies, databaseTime))`.
+It begins a transaction, reads `clock_timestamp()` exactly once, then invokes the
+factory with that timestamp. The factory must return a non-null world whose
+CheckpointTime equals the captured database time exactly. That snapshot is stored
+with version 0; created_at and updated_at use the same captured timestamp. The
+transaction commits only after successful validation and insertion. Factory failure,
+null return or a mismatched checkpoint aborts creation. Keep factories free of
+external side effects and use the supplied time for initial movement/battle setup.
+The first current read advances from this database-derived checkpoint solely by
+elapsed database time, without compensating for an application-clock creation time.
+
+`CreateAsync(matchId, initialWorld)` remains available for **imports, tests and exact
+snapshot insertion**. It preserves the supplied initial checkpoint, which must not
+be ahead of the database clock, and uses one DB timestamp for creation/update metadata.
+Use the factory overload for production creation. All repository operations reject
+Guid.Empty match IDs before opening a connection. Matchmaking is not included.
 
 `ExecuteAsync(matchId, operation)` performs this sequence:
 
