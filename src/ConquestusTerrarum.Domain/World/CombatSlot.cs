@@ -82,5 +82,3 @@ public sealed class CombatSlot
         return (integer, (bits[3] >> 16) & 0xff);
     }
 }
-
-
