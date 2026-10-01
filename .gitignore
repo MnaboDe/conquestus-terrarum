@@ -79,7 +79,6 @@ StyleCopReport.xml
 *_p.c
 *_h.h
 *.ilk
-*.meta
 *.obj
 *.iobj
 *.pch
@@ -480,3 +479,25 @@ $RECYCLE.BIN/
 
 # Vim temporary swap files
 *.swp
+# Unity
+client/ConquestusTerrarumClient/[Ll]ibrary/
+client/ConquestusTerrarumClient/[Tt]emp/
+client/ConquestusTerrarumClient/[Oo]bj/
+client/ConquestusTerrarumClient/[Bb]uild/
+client/ConquestusTerrarumClient/[Bb]uilds/
+client/ConquestusTerrarumClient/[Ll]ogs/
+client/ConquestusTerrarumClient/[Uu]ser[Ss]ettings/
+client/ConquestusTerrarumClient/MemoryCaptures/
+client/ConquestusTerrarumClient/Recordings/
+
+# Unity generated IDE files
+client/ConquestusTerrarumClient/*.csproj
+client/ConquestusTerrarumClient/*.sln
+client/ConquestusTerrarumClient/*.suo
+client/ConquestusTerrarumClient/*.tmp
+client/ConquestusTerrarumClient/*.user
+client/ConquestusTerrarumClient/*.userprefs
+
+# Unity package manifest must be versioned
+!client/ConquestusTerrarumClient/Packages/
+!client/ConquestusTerrarumClient/Packages/**
