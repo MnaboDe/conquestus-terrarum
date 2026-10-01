@@ -4,18 +4,26 @@ public sealed class WorldState
 {
     private readonly Dictionary<Guid, Army> _armies;
     private readonly Dictionary<Guid, Battle> _battles = new();
+    private readonly List<PlayerAlliance> _alliances;
 
     public GameMap Map { get; }
 
     public DateTimeOffset CheckpointTime { get; private set; }
 
-    public IReadOnlyCollection<Army> Armies => _armies.Values;
-    public IReadOnlyCollection<Battle> Battles => _battles.Values;
+    public IReadOnlyCollection<Army> Armies =>
+        _armies.Values;
+
+    public IReadOnlyCollection<Battle> Battles =>
+        _battles.Values;
+
+    public IReadOnlyCollection<PlayerAlliance> Alliances =>
+        _alliances;
 
     public WorldState(
         GameMap map,
         IEnumerable<Army> armies,
-        DateTimeOffset checkpointTime)
+        DateTimeOffset checkpointTime,
+        IEnumerable<PlayerAlliance>? alliances = null)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(armies);
@@ -23,15 +31,23 @@ public sealed class WorldState
         Map = map;
         CheckpointTime = checkpointTime;
 
-        _armies = armies.ToDictionary(army => army.Id);
+        _armies = armies.ToDictionary(
+            army => army.Id);
+
+        _alliances = alliances?.ToList()
+            ?? new List<PlayerAlliance>();
 
         ValidateArmyLocations();
-        ReconcileAllBattles(checkpointTime);
+
+        ReconcileAllBattles(
+            checkpointTime);
     }
 
     public Army GetArmy(Guid armyId)
     {
-        if (!_armies.TryGetValue(armyId, out var army))
+        if (!_armies.TryGetValue(
+                armyId,
+                out var army))
         {
             throw new InvalidOperationException(
                 $"Army '{armyId}' does not exist.");
@@ -40,10 +56,36 @@ public sealed class WorldState
         return army;
     }
 
-    public Battle? GetBattleAt(Guid locationId)
+    public Battle? GetBattleAt(
+        Guid locationId)
     {
-        _battles.TryGetValue(locationId, out var battle);
+        _battles.TryGetValue(
+            locationId,
+            out var battle);
+
         return battle;
+    }
+
+    public bool AreAllies(
+        Guid firstPlayerId,
+        Guid secondPlayerId)
+    {
+        if (firstPlayerId == secondPlayerId)
+            return true;
+
+        return _alliances.Any(
+            alliance => alliance.Connects(
+                firstPlayerId,
+                secondPlayerId));
+    }
+
+    public bool AreHostile(
+        Guid firstPlayerId,
+        Guid secondPlayerId)
+    {
+        return !AreAllies(
+            firstPlayerId,
+            secondPlayerId);
     }
 
     public void StartMovement(
@@ -69,7 +111,8 @@ public sealed class WorldState
                 "Army is not currently located anywhere.");
         }
 
-        var originLocationId = army.LocationId.Value;
+        var originLocationId =
+            army.LocationId.Value;
 
         if (GetBattleAt(originLocationId) is not null)
         {
@@ -77,7 +120,8 @@ public sealed class WorldState
                 "Army cannot start normal movement while in battle.");
         }
 
-        Map.GetLocation(destinationId);
+        Map.GetLocation(
+            destinationId);
 
         var connection = Map.GetConnection(
             originLocationId,
@@ -98,18 +142,19 @@ public sealed class WorldState
         Guid locationId,
         DateTimeOffset logicalTime)
     {
-        Map.GetLocation(locationId);
+        Map.GetLocation(
+            locationId);
 
-        var ownerCount = _armies.Values
-            .Where(army => army.LocationId == locationId)
-            .Select(army => army.OwnerId)
-            .Distinct()
-            .Take(2)
-            .Count();
+        var armiesAtLocation = _armies.Values
+            .Where(army =>
+                army.LocationId == locationId)
+            .ToArray();
 
-        var hasEnemies = ownerCount >= 2;
+        var hasHostilePair =
+            HasHostilePair(
+                armiesAtLocation);
 
-        if (hasEnemies)
+        if (hasHostilePair)
         {
             if (!_battles.ContainsKey(locationId))
             {
@@ -122,7 +167,37 @@ public sealed class WorldState
             return;
         }
 
-        _battles.Remove(locationId);
+        _battles.Remove(
+            locationId);
+    }
+
+    private bool HasHostilePair(
+        IReadOnlyList<Army> armies)
+    {
+        for (var firstIndex = 0;
+             firstIndex < armies.Count;
+             firstIndex++)
+        {
+            for (var secondIndex = firstIndex + 1;
+                 secondIndex < armies.Count;
+                 secondIndex++)
+            {
+                var firstArmy =
+                    armies[firstIndex];
+
+                var secondArmy =
+                    armies[secondIndex];
+
+                if (AreHostile(
+                        firstArmy.OwnerId,
+                        secondArmy.OwnerId))
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private void ReconcileAllBattles(
@@ -142,7 +217,8 @@ public sealed class WorldState
         {
             if (army.LocationId is { } locationId)
             {
-                Map.GetLocation(locationId);
+                Map.GetLocation(
+                    locationId);
             }
 
             if (army.Movement is { } movement)
