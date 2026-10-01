@@ -17,6 +17,7 @@ namespace ConquestusTerrarum.Client
             Object.DontDestroyOnLoad(root);
 
             root.AddComponent<MatchController>();
+            root.AddComponent<MapPresenter>();
             root.AddComponent<DebugHud>();
         }
     }
