@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Linq;
 using UnityEngine;
 
 namespace ConquestusTerrarum.Client
@@ -13,6 +14,17 @@ namespace ConquestusTerrarum.Client
         public string LastError { get; private set; }
 
         public bool IsBusy { get; private set; }
+
+        public string SelectedArmyId { get; private set; }
+
+        public ArmyDto SelectedArmy =>
+            State?.armies?.FirstOrDefault(
+                army =>
+                    army != null &&
+                    string.Equals(
+                        army.id,
+                        SelectedArmyId,
+                        StringComparison.Ordinal));
 
         private ConquestusApiClient _api;
 
@@ -53,6 +65,7 @@ namespace ConquestusTerrarum.Client
                 return;
 
             IsBusy = true;
+            SelectedArmyId = null;
             LastError = null;
             Status = "Creating demo match...";
 
@@ -80,6 +93,163 @@ namespace ConquestusTerrarum.Client
                     HandleError));
         }
 
+        public void SelectArmy(string armyId)
+        {
+            if (State?.armies == null)
+                return;
+
+            var army =
+                State.armies.FirstOrDefault(
+                    candidate =>
+                        candidate != null &&
+                        string.Equals(
+                            candidate.id,
+                            armyId,
+                            StringComparison.Ordinal));
+
+            if (army == null)
+                return;
+
+            SelectedArmyId = army.id;
+
+            Status =
+                $"Selected army {ShortId(army.id)}";
+        }
+
+        public void ClickLocation(string locationId)
+        {
+            if (IsBusy)
+                return;
+
+            var army = SelectedArmy;
+
+            if (army == null)
+            {
+                Status = "Select an army first.";
+                return;
+            }
+
+            if (army.isDestroyed)
+            {
+                Status = "Destroyed army cannot move.";
+                return;
+            }
+
+            if (army.isMoving)
+            {
+                Status = "Army is already moving.";
+                return;
+            }
+
+            if (army.isInBattle)
+            {
+                Status =
+                    "Army is in battle. Use Retreat when available.";
+
+                return;
+            }
+
+            if (string.IsNullOrWhiteSpace(army.locationId))
+            {
+                Status = "Army has no current location.";
+                return;
+            }
+
+            if (string.Equals(
+                    army.locationId,
+                    locationId,
+                    StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            if (!IsConnected(
+                    army.locationId,
+                    locationId))
+            {
+                Status =
+                    "That location is not directly connected.";
+
+                return;
+            }
+
+            MoveSelectedArmy(locationId);
+        }
+
+        public void RetreatSelectedArmy()
+        {
+            if (IsBusy)
+                return;
+
+            var army = SelectedArmy;
+
+            if (army == null || !army.canRetreat)
+                return;
+
+            IsBusy = true;
+            LastError = null;
+            Status = "Retreating...";
+
+            StartCoroutine(
+                _api.RetreatArmy(
+                    State.matchId,
+                    army.id,
+                    ApplyState,
+                    HandleError));
+        }
+
+        private void MoveSelectedArmy(
+            string destinationLocationId)
+        {
+            var army = SelectedArmy;
+
+            if (army == null)
+                return;
+
+            IsBusy = true;
+            LastError = null;
+            Status = "Sending move command...";
+
+            StartCoroutine(
+                _api.MoveArmy(
+                    State.matchId,
+                    army.id,
+                    destinationLocationId,
+                    ApplyState,
+                    HandleError));
+        }
+
+        private bool IsConnected(
+            string firstLocationId,
+            string secondLocationId)
+        {
+            if (State?.connections == null)
+                return false;
+
+            return State.connections.Any(
+                connection =>
+                    connection != null &&
+                    (
+                        string.Equals(
+                            connection.fromLocationId,
+                            firstLocationId,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            connection.toLocationId,
+                            secondLocationId,
+                            StringComparison.Ordinal)
+                        ||
+                        string.Equals(
+                            connection.fromLocationId,
+                            secondLocationId,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            connection.toLocationId,
+                            firstLocationId,
+                            StringComparison.Ordinal)
+                    ));
+        }
+
         private void ApplyState(MatchStateDto state)
         {
             State = state;
@@ -93,6 +263,19 @@ namespace ConquestusTerrarum.Client
 
             _realtimeAnchor =
                 Time.realtimeSinceStartupAsDouble;
+
+            if (!string.IsNullOrWhiteSpace(SelectedArmyId) &&
+                (state.armies == null ||
+                 !state.armies.Any(
+                     army =>
+                         army != null &&
+                         string.Equals(
+                             army.id,
+                             SelectedArmyId,
+                             StringComparison.Ordinal))))
+            {
+                SelectedArmyId = null;
+            }
 
             IsBusy = false;
             LastError = null;
@@ -113,6 +296,16 @@ namespace ConquestusTerrarum.Client
             Status = "Request failed.";
 
             Debug.LogError(error);
+        }
+
+        private static string ShortId(string id)
+        {
+            if (string.IsNullOrWhiteSpace(id))
+                return "?";
+
+            return id.Length <= 6
+                ? id
+                : id[..6];
         }
     }
 }

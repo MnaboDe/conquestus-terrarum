@@ -8,16 +8,13 @@ namespace ConquestusTerrarum.Client
     public sealed class MapPresenter : MonoBehaviour
     {
         private MatchController _controller;
-
         private MatchStateDto _presentedState;
 
-        private readonly Dictionary<string, Vector2>
-            _locationPositions =
-                new(StringComparer.Ordinal);
+        private readonly Dictionary<string, Vector2> _locationPositions =
+            new Dictionary<string, Vector2>(StringComparer.Ordinal);
 
-        private readonly Dictionary<string, GameObject>
-            _armyObjects =
-                new(StringComparer.Ordinal);
+        private readonly Dictionary<string, GameObject> _armyObjects =
+            new Dictionary<string, GameObject>(StringComparer.Ordinal);
 
         private GameObject _mapRoot;
 
@@ -27,8 +24,7 @@ namespace ConquestusTerrarum.Client
 
         private void Awake()
         {
-            _controller =
-                GetComponent<MatchController>();
+            _controller = GetComponent<MatchController>();
 
             CreateRuntimeAssets();
             ConfigureCamera();
@@ -36,18 +32,16 @@ namespace ConquestusTerrarum.Client
 
         private void Update()
         {
-            if (_controller == null ||
-                _controller.State == null)
+            if (_controller == null || _controller.State == null)
                 return;
 
-            if (!ReferenceEquals(
-                    _presentedState,
-                    _controller.State))
+            if (!ReferenceEquals(_presentedState, _controller.State))
             {
                 Rebuild(_controller.State);
             }
 
             UpdateArmyPositions();
+            UpdateArmySelectionVisuals();
         }
 
         private void Rebuild(MatchStateDto state)
@@ -57,21 +51,19 @@ namespace ConquestusTerrarum.Client
             if (_mapRoot != null)
                 Destroy(_mapRoot);
 
-            _mapRoot =
-                new GameObject("RuntimeMap");
-
-            _mapRoot.transform.SetParent(
-                transform,
-                false);
+            _mapRoot = new GameObject("RuntimeMap");
+            _mapRoot.transform.SetParent(transform, false);
 
             _armyObjects.Clear();
             _locationPositions.Clear();
 
-            var positions =
+            Dictionary<string, Vector2> positions =
                 MapLayout.Build(state.locations);
 
-            foreach (var pair in positions)
+            foreach (KeyValuePair<string, Vector2> pair in positions)
+            {
                 _locationPositions[pair.Key] = pair.Value;
+            }
 
             CreateConnections(state);
             CreateLocations(state);
@@ -83,27 +75,36 @@ namespace ConquestusTerrarum.Client
             if (state.connections == null)
                 return;
 
-            foreach (var connection in state.connections)
+            foreach (ConnectionDto connection in state.connections)
             {
+                if (connection == null)
+                    continue;
+
+                Vector2 from;
                 if (!_locationPositions.TryGetValue(
                         connection.fromLocationId,
-                        out var from))
+                        out from))
+                {
                     continue;
+                }
 
+                Vector2 to;
                 if (!_locationPositions.TryGetValue(
                         connection.toLocationId,
-                        out var to))
+                        out to))
+                {
                     continue;
+                }
 
-                var gameObject =
+                GameObject connectionObject =
                     new GameObject("Connection");
 
-                gameObject.transform.SetParent(
+                connectionObject.transform.SetParent(
                     _mapRoot.transform,
                     false);
 
-                var line =
-                    gameObject.AddComponent<LineRenderer>();
+                LineRenderer line =
+                    connectionObject.AddComponent<LineRenderer>();
 
                 line.material = _lineMaterial;
                 line.positionCount = 2;
@@ -120,10 +121,11 @@ namespace ConquestusTerrarum.Client
                     1,
                     new Vector3(to.x, to.y, 0f));
 
-                line.startColor =
+                Color lineColor =
                     new Color(0.55f, 0.65f, 0.75f);
 
-                line.endColor = line.startColor;
+                line.startColor = lineColor;
+                line.endColor = lineColor;
             }
         }
 
@@ -132,47 +134,63 @@ namespace ConquestusTerrarum.Client
             if (state.locations == null)
                 return;
 
-            foreach (var location in state.locations)
+            foreach (LocationDto location in state.locations)
             {
-                if (!_locationPositions.TryGetValue(
-                        location.id,
-                        out var position))
+                if (location == null)
                     continue;
 
-                var gameObject =
-                    new GameObject(
-                        $"Location - {location.name}");
+                Vector2 position;
 
-                gameObject.transform.SetParent(
+                if (!_locationPositions.TryGetValue(
+                        location.id,
+                        out position))
+                {
+                    continue;
+                }
+
+                GameObject locationObject =
+                    new GameObject(
+                        "Location - " + location.name);
+
+                locationObject.transform.SetParent(
                     _mapRoot.transform,
                     false);
 
-                gameObject.transform.position =
+                locationObject.transform.position =
                     new Vector3(
                         position.x,
                         position.y,
                         0f);
 
-                gameObject.transform.localScale =
+                locationObject.transform.localScale =
                     Vector3.one * 1.25f;
 
-                var renderer =
-                    gameObject.AddComponent<SpriteRenderer>();
+                SpriteRenderer renderer =
+                    locationObject.AddComponent<SpriteRenderer>();
 
                 renderer.sprite = _locationSprite;
                 renderer.color =
-                    new Color(
-                        0.75f,
-                        0.82f,
-                        0.9f);
+                    new Color(0.75f, 0.82f, 0.9f);
 
                 renderer.sortingOrder = 0;
 
-                var labelObject =
+                // Click target
+                CircleCollider2D collider =
+                    locationObject.AddComponent<CircleCollider2D>();
+
+                collider.radius = 0.5f;
+
+                LocationView locationView =
+                    locationObject.AddComponent<LocationView>();
+
+                locationView.Initialize(location.id);
+
+                // Label
+                GameObject labelObject =
                     new GameObject("Label");
 
                 labelObject.transform.SetParent(
-                    gameObject.transform,
+                    locationObject.transform,
                     false);
 
                 labelObject.transform.localPosition =
@@ -181,7 +199,7 @@ namespace ConquestusTerrarum.Client
                 labelObject.transform.localScale =
                     Vector3.one / 1.25f;
 
-                var label =
+                TextMesh label =
                     labelObject.AddComponent<TextMesh>();
 
                 label.text = location.name;
@@ -191,20 +209,22 @@ namespace ConquestusTerrarum.Client
                 label.characterSize = 0.08f;
                 label.color = Color.white;
 
-                var textRenderer =
+                MeshRenderer textRenderer =
                     label.GetComponent<MeshRenderer>();
 
                 textRenderer.sortingOrder = 10;
 
                 if (HasBattle(state, location.id))
-                    CreateBattleLabel(gameObject);
+                {
+                    CreateBattleLabel(locationObject);
+                }
             }
         }
 
         private void CreateBattleLabel(
             GameObject locationObject)
         {
-            var battleObject =
+            GameObject battleObject =
                 new GameObject("BattleLabel");
 
             battleObject.transform.SetParent(
@@ -217,7 +237,7 @@ namespace ConquestusTerrarum.Client
             battleObject.transform.localScale =
                 Vector3.one / 1.25f;
 
-            var label =
+            TextMesh label =
                 battleObject.AddComponent<TextMesh>();
 
             label.text = "BATTLE";
@@ -225,10 +245,13 @@ namespace ConquestusTerrarum.Client
             label.alignment = TextAlignment.Center;
             label.fontSize = 40;
             label.characterSize = 0.075f;
-            label.color = new Color(1f, 0.3f, 0.25f);
+            label.color =
+                new Color(1f, 0.3f, 0.25f);
 
-            label.GetComponent<MeshRenderer>()
-                .sortingOrder = 20;
+            MeshRenderer renderer =
+                label.GetComponent<MeshRenderer>();
+
+            renderer.sortingOrder = 20;
         }
 
         private void CreateArmies(MatchStateDto state)
@@ -236,25 +259,24 @@ namespace ConquestusTerrarum.Client
             if (state.armies == null)
                 return;
 
-            foreach (var army in state.armies)
+            foreach (ArmyDto army in state.armies)
             {
-                if (army == null ||
-                    army.isDestroyed)
+                if (army == null || army.isDestroyed)
                     continue;
 
-                var gameObject =
+                GameObject armyObject =
                     new GameObject(
-                        $"Army - {ShortId(army.id)}");
+                        "Army - " + ShortId(army.id));
 
-                gameObject.transform.SetParent(
+                armyObject.transform.SetParent(
                     _mapRoot.transform,
                     false);
 
-                gameObject.transform.localScale =
+                armyObject.transform.localScale =
                     Vector3.one * 0.42f;
 
-                var renderer =
-                    gameObject.AddComponent<SpriteRenderer>();
+                SpriteRenderer renderer =
+                    armyObject.AddComponent<SpriteRenderer>();
 
                 renderer.sprite = _armySprite;
                 renderer.color =
@@ -262,7 +284,18 @@ namespace ConquestusTerrarum.Client
 
                 renderer.sortingOrder = 30;
 
-                _armyObjects[army.id] = gameObject;
+                // Click target
+                CircleCollider2D collider =
+                    armyObject.AddComponent<CircleCollider2D>();
+
+                collider.radius = 0.5f;
+
+                ArmyView armyView =
+                    armyObject.AddComponent<ArmyView>();
+
+                armyView.Initialize(army.id);
+
+                _armyObjects[army.id] = armyObject;
             }
 
             UpdateArmyPositions();
@@ -270,19 +303,24 @@ namespace ConquestusTerrarum.Client
 
         private void UpdateArmyPositions()
         {
-            var state = _presentedState;
+            MatchStateDto state = _presentedState;
 
-            if (state?.armies == null)
+            if (state == null || state.armies == null)
                 return;
 
-            foreach (var army in state.armies)
+            foreach (ArmyDto army in state.armies)
             {
-                if (army == null ||
-                    army.isDestroyed ||
-                    !_armyObjects.TryGetValue(
-                        army.id,
-                        out var armyObject))
+                if (army == null || army.isDestroyed)
                     continue;
+
+                GameObject armyObject;
+
+                if (!_armyObjects.TryGetValue(
+                        army.id,
+                        out armyObject))
+                {
+                    continue;
+                }
 
                 if (army.isMoving &&
                     army.movement != null)
@@ -296,14 +334,20 @@ namespace ConquestusTerrarum.Client
 
                 if (string.IsNullOrWhiteSpace(
                         army.locationId))
+                {
                     continue;
+                }
+
+                Vector2 locationPosition;
 
                 if (!_locationPositions.TryGetValue(
                         army.locationId,
-                        out var locationPosition))
+                        out locationPosition))
+                {
                     continue;
+                }
 
-                var offset =
+                Vector2 offset =
                     GetStationaryArmyOffset(
                         state,
                         army);
@@ -319,43 +363,75 @@ namespace ConquestusTerrarum.Client
         private Vector3 GetMovingPosition(
             MovementDto movement)
         {
+            Vector2 from;
+
             if (!_locationPositions.TryGetValue(
                     movement.fromLocationId,
-                    out var from))
+                    out from))
+            {
                 return Vector3.zero;
+            }
+
+            Vector2 to;
 
             if (!_locationPositions.TryGetValue(
                     movement.toLocationId,
-                    out var to))
-                return new Vector3(from.x, from.y, -0.1f);
+                    out to))
+            {
+                return new Vector3(
+                    from.x,
+                    from.y,
+                    -0.1f);
+            }
+
+            DateTimeOffset startedAt;
 
             if (!DateTimeOffset.TryParse(
                     movement.startedAt,
-                    out var startedAt))
-                return new Vector3(from.x, from.y, -0.1f);
+                    out startedAt))
+            {
+                return new Vector3(
+                    from.x,
+                    from.y,
+                    -0.1f);
+            }
+
+            DateTimeOffset arriveAt;
 
             if (!DateTimeOffset.TryParse(
                     movement.arriveAt,
-                    out var arriveAt))
-                return new Vector3(from.x, from.y, -0.1f);
+                    out arriveAt))
+            {
+                return new Vector3(
+                    from.x,
+                    from.y,
+                    -0.1f);
+            }
 
-            var totalSeconds =
-                (arriveAt - startedAt).TotalSeconds;
+            double totalSeconds =
+                (arriveAt - startedAt)
+                .TotalSeconds;
 
             if (totalSeconds <= 0)
-                return new Vector3(to.x, to.y, -0.1f);
+            {
+                return new Vector3(
+                    to.x,
+                    to.y,
+                    -0.1f);
+            }
 
-            var elapsedSeconds =
+            double elapsedSeconds =
                 (_controller.PresentationServerTime -
-                 startedAt).TotalSeconds;
+                 startedAt)
+                .TotalSeconds;
 
-            var progress =
+            float progress =
                 Mathf.Clamp01(
                     (float)(
                         elapsedSeconds /
                         totalSeconds));
 
-            var position =
+            Vector2 position =
                 Vector2.Lerp(
                     from,
                     to,
@@ -371,7 +447,7 @@ namespace ConquestusTerrarum.Client
             MatchStateDto state,
             ArmyDto army)
         {
-            var armiesAtLocation =
+            ArmyDto[] armiesAtLocation =
                 state.armies
                     .Where(other =>
                         other != null &&
@@ -386,7 +462,7 @@ namespace ConquestusTerrarum.Client
                         StringComparer.Ordinal)
                     .ToArray();
 
-            var index =
+            int index =
                 Array.FindIndex(
                     armiesAtLocation,
                     other =>
@@ -398,15 +474,17 @@ namespace ConquestusTerrarum.Client
             if (index < 0)
                 return Vector2.zero;
 
-            var count =
+            int count =
                 armiesAtLocation.Length;
 
             if (count == 1)
                 return new Vector2(0f, -0.05f);
 
-            var angle =
-                Mathf.PI * 2f *
-                index / count;
+            float angle =
+                Mathf.PI *
+                2f *
+                index /
+                count;
 
             const float radius = 0.48f;
 
@@ -416,18 +494,41 @@ namespace ConquestusTerrarum.Client
                 radius;
         }
 
+        private void UpdateArmySelectionVisuals()
+        {
+            foreach (
+                KeyValuePair<string, GameObject> pair
+                in _armyObjects)
+            {
+                if (pair.Value == null)
+                    continue;
+
+                bool selected =
+                    string.Equals(
+                        pair.Key,
+                        _controller.SelectedArmyId,
+                        StringComparison.Ordinal);
+
+                pair.Value.transform.localScale =
+                    Vector3.one *
+                    (selected ? 0.62f : 0.42f);
+            }
+        }
+
         private static bool HasBattle(
             MatchStateDto state,
             string locationId)
         {
-            return state.activeBattles != null &&
-                   state.activeBattles.Any(
-                       battle =>
-                           battle != null &&
-                           string.Equals(
-                               battle.locationId,
-                               locationId,
-                               StringComparison.Ordinal));
+            if (state.activeBattles == null)
+                return false;
+
+            return state.activeBattles.Any(
+                battle =>
+                    battle != null &&
+                    string.Equals(
+                        battle.locationId,
+                        locationId,
+                        StringComparison.Ordinal));
         }
 
         private void CreateRuntimeAssets()
@@ -438,15 +539,17 @@ namespace ConquestusTerrarum.Client
             _armySprite =
                 CreateCircleSprite(32);
 
+            Shader shader =
+                Shader.Find("Sprites/Default");
+
             _lineMaterial =
-                new Material(
-                    Shader.Find("Sprites/Default"));
+                new Material(shader);
         }
 
         private static Sprite CreateCircleSprite(
             int size)
         {
-            var texture =
+            Texture2D texture =
                 new Texture2D(
                     size,
                     size,
@@ -456,28 +559,27 @@ namespace ConquestusTerrarum.Client
             texture.filterMode =
                 FilterMode.Bilinear;
 
-            var pixels =
+            Color[] pixels =
                 new Color[size * size];
 
-            var center =
+            float center =
                 (size - 1) * 0.5f;
 
-            var radius =
+            float radius =
                 size * 0.46f;
 
-            for (var y = 0; y < size; y++)
+            for (int y = 0; y < size; y++)
             {
-                for (var x = 0; x < size; x++)
+                for (int x = 0; x < size; x++)
                 {
-                    var dx = x - center;
-                    var dy = y - center;
+                    float dx = x - center;
+                    float dy = y - center;
 
-                    var inside =
+                    bool inside =
                         dx * dx + dy * dy <=
                         radius * radius;
 
-                    pixels[
-                        y * size + x] =
+                    pixels[y * size + x] =
                         inside
                             ? Color.white
                             : Color.clear;
@@ -501,17 +603,19 @@ namespace ConquestusTerrarum.Client
         private static Color OwnerColor(
             string ownerId)
         {
+            Guid id;
+
             if (!Guid.TryParse(
                     ownerId,
-                    out var id))
+                    out id))
             {
                 return Color.white;
             }
 
-            var bytes =
+            byte[] bytes =
                 id.ToByteArray();
 
-            var hue =
+            float hue =
                 bytes[0] / 255f;
 
             return Color.HSVToRGB(
@@ -528,13 +632,12 @@ namespace ConquestusTerrarum.Client
 
             return id.Length <= 6
                 ? id
-                : id[..6];
+                : id.Substring(0, 6);
         }
 
         private static void ConfigureCamera()
         {
-            var camera =
-                Camera.main;
+            Camera camera = Camera.main;
 
             if (camera == null)
                 return;
