@@ -3,6 +3,8 @@
 public sealed class Army
 {
     private bool _retreatLocked;
+    public IReadOnlyList<Unit> Units { get; }
+    public bool IsDestroyed => !Units.Any(unit => unit.IsAlive);
 
     public Guid Id { get; }
     public Guid OwnerId { get; }
@@ -29,7 +31,8 @@ public sealed class Army
     public Army(
         Guid id,
         Guid ownerId,
-        Guid locationId)
+        Guid locationId,
+        IEnumerable<Unit> units)
     {
         if (id == Guid.Empty)
         {
@@ -52,9 +55,16 @@ public sealed class Army
                 nameof(locationId));
         }
 
+        ArgumentNullException.ThrowIfNull(units);
+        var unitList = units.ToList();
+        if (unitList.Any(unit => unit is null)) throw new ArgumentException("Units cannot contain null.", nameof(units));
+        if (unitList.Select(unit => unit.Id).Distinct().Count() != unitList.Count)
+            throw new ArgumentException("Unit ids must be unique within an army.", nameof(units));
+        Units = unitList.AsReadOnly();
         Id = id;
         OwnerId = ownerId;
         LocationId = locationId;
+        RemoveIfDestroyed();
     }
 
     public void StartMovement(
@@ -62,6 +72,7 @@ public sealed class Army
         DateTimeOffset startedAt)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (IsDestroyed) throw new InvalidOperationException("Destroyed armies cannot move or retreat.");
 
         if (IsMoving)
         {
@@ -100,6 +111,7 @@ public sealed class Army
         DateTimeOffset startedAt)
     {
         ArgumentNullException.ThrowIfNull(connection);
+        if (IsDestroyed) throw new InvalidOperationException("Destroyed armies cannot move or retreat.");
 
         if (!CanRetreat)
         {
@@ -197,6 +209,15 @@ public sealed class Army
     {
         IsInBattle = false;
         RetreatLocationId = null;
+    }
+
+    internal void RemoveIfDestroyed()
+    {
+        if (!IsDestroyed) return;
+        LocationId = null;
+        EnteredLocationAt = null;
+        Movement = null;
+        LeaveBattle();
     }
 
     private static Guid GetDestination(

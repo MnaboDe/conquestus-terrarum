@@ -25,7 +25,7 @@ public class WorldStateTests
             new[] { a, b },
             new[] { connection });
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -64,7 +64,7 @@ public class WorldStateTests
             new[] { a, b },
             Array.Empty<MapConnection>());
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -108,7 +108,7 @@ public class WorldStateTests
             new[] { a, b, c },
             new[] { ab, bc });
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -156,7 +156,7 @@ public class WorldStateTests
             new[] { location },
             Array.Empty<MapConnection>());
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             location.Id);

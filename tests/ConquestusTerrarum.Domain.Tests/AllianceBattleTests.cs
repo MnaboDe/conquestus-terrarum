@@ -24,13 +24,13 @@ public class AllianceBattleTests
                 Array.Empty<MapConnection>());
 
         var army1 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 location.Id);
 
         var army2 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 location.Id);
@@ -70,13 +70,13 @@ public class AllianceBattleTests
                 player2);
 
         var army1 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 player1,
                 location.Id);
 
         var army2 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 player2,
                 location.Id);
@@ -109,19 +109,19 @@ public class AllianceBattleTests
                 Array.Empty<MapConnection>());
 
         var army1 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 location.Id);
 
         var army2 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 location.Id);
 
         var army3 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 Guid.NewGuid(),
                 location.Id);
@@ -184,19 +184,19 @@ public class AllianceBattleTests
                 playerC);
 
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 location.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 location.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 location.Id);
@@ -249,13 +249,13 @@ public class AllianceBattleTests
             Guid.NewGuid();
 
         var army1 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerId,
                 location.Id);
 
         var army2 =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerId,
                 location.Id);
