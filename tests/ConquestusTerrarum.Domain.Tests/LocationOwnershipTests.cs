@@ -60,19 +60,19 @@ public class LocationOwnershipTests
 
         // A уже находится в Rome с 10:00.
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 battlefield.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 cStart.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 bStart.Id);
@@ -194,19 +194,19 @@ public class LocationOwnershipTests
                 });
 
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 aStart.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 bStart.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 cStart.Id);

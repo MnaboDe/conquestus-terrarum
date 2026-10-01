@@ -6,6 +6,8 @@ public sealed class WorldState
     private readonly Dictionary<Guid, Battle> _battles = new();
     private readonly List<PlayerAlliance> _alliances;
 
+    public ulong RandomSeed { get; }
+
     public GameMap Map { get; }
 
     public DateTimeOffset CheckpointTime { get; private set; }
@@ -23,11 +25,13 @@ public sealed class WorldState
         GameMap map,
         IEnumerable<Army> armies,
         DateTimeOffset checkpointTime,
-        IEnumerable<PlayerAlliance>? alliances = null)
+        IEnumerable<PlayerAlliance>? alliances = null,
+        ulong randomSeed = 0)
     {
         ArgumentNullException.ThrowIfNull(map);
         ArgumentNullException.ThrowIfNull(armies);
 
+        RandomSeed = randomSeed;
         Map = map;
         CheckpointTime = checkpointTime;
 
@@ -37,11 +41,15 @@ public sealed class WorldState
         _alliances = alliances?.ToList()
             ?? new List<PlayerAlliance>();
 
+        if (_armies.Values.SelectMany(army => army.Units).Select(unit => unit.Id).Distinct().Count() !=
+            _armies.Values.Sum(army => army.Units.Count))
+            throw new ArgumentException("Unit ids must be unique across the world.", nameof(armies));
         ValidateArmyLocations();
         InitializeArmyEntryTimes();
 
         ReconcileAllBattles(
             checkpointTime);
+        RefillBattles(checkpointTime);
     }
 
     public Army GetArmy(Guid armyId)
@@ -141,14 +149,15 @@ public sealed class WorldState
 
     internal void ReconcileBattleAt(
         Guid locationId,
-        DateTimeOffset logicalTime)
+        DateTimeOffset logicalTime,
+        bool resolveOwnership = true)
     {
         var location =
             Map.GetLocation(locationId);
 
         var armiesAtLocation = _armies.Values
             .Where(army =>
-                army.LocationId == locationId)
+                !army.IsDestroyed && army.LocationId == locationId)
             .ToArray();
 
         var hadBattle =
@@ -165,7 +174,8 @@ public sealed class WorldState
                 _battles[locationId] =
                     new Battle(
                         locationId,
-                        logicalTime);
+                        logicalTime,
+                        RandomSeed);
             }
 
             foreach (var army in armiesAtLocation)
@@ -202,7 +212,7 @@ public sealed class WorldState
             army.LeaveBattle();
         }
 
-        ResolveOwnerAfterBattle(
+        if (resolveOwnership) ResolveOwnerAfterBattle(
             location,
             armiesAtLocation);
     }
@@ -291,13 +301,34 @@ public sealed class WorldState
                 battleLocationId,
                 retreatLocationId);
 
-        army.StartRetreat(
+        foreach (var unit in army.Units.Where(unit => unit.IsWounded)) unit.Kill();
+        army.RemoveIfDestroyed();
+        if (!army.IsDestroyed) army.StartRetreat(
             connection,
             commandTime);
 
         ReconcileBattleAt(
             battleLocationId,
             commandTime);
+        RefillBattles(commandTime);
+    }
+
+    internal void RefillBattles(DateTimeOffset time)
+    {
+        foreach (var battle in _battles.Values) battle.Refill(this, time);
+    }
+
+    internal Guid[] ReconcileWorld(DateTimeOffset time)
+    {
+        var previous = _battles.Keys.ToArray();
+        ReconcileAllBattles(time, resolveOwnership: false);
+        return previous.Where(id => !_battles.ContainsKey(id)).ToArray();
+    }
+
+    internal void ResolvePostBattleOwnership(IEnumerable<Guid> endedLocations)
+    {
+        foreach (var id in endedLocations)
+            ResolveOwnerAfterBattle(Map.GetLocation(id), _armies.Values.Where(army => !army.IsDestroyed && army.LocationId == id).ToArray());
     }
 
     private bool HasHostilePair(
@@ -330,13 +361,15 @@ public sealed class WorldState
     }
 
     private void ReconcileAllBattles(
-        DateTimeOffset logicalTime)
+        DateTimeOffset logicalTime,
+        bool resolveOwnership = true)
     {
         foreach (var location in Map.Locations)
         {
             ReconcileBattleAt(
                 location.Id,
-                logicalTime);
+                logicalTime,
+                resolveOwnership);
         }
     }
 

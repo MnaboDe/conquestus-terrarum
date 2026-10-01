@@ -28,19 +28,19 @@ public class BattleParticipationTests
         var playerC = Guid.NewGuid();
 
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 location.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 location.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 location.Id);
@@ -124,19 +124,19 @@ public class BattleParticipationTests
         var playerC = Guid.NewGuid();
 
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 battlefield.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 battlefield.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 battlefield.Id);

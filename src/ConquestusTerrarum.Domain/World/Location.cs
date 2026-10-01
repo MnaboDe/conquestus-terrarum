@@ -2,6 +2,8 @@
 
 public sealed class Location
 {
+    public int CombatSlotCount { get; }
+
     public Guid Id { get; }
     public string Name { get; }
 
@@ -10,7 +12,8 @@ public sealed class Location
     public Location(
         Guid id,
         string name,
-        Guid? ownerId = null)
+        Guid? ownerId = null,
+        int combatSlotCount = 1)
     {
         if (id == Guid.Empty)
             throw new ArgumentException(
@@ -27,6 +30,8 @@ public sealed class Location
                 "Owner id cannot be empty.",
                 nameof(ownerId));
 
+        if (combatSlotCount <= 0) throw new ArgumentOutOfRangeException(nameof(combatSlotCount));
+        CombatSlotCount = combatSlotCount;
         Id = id;
         Name = name;
         OwnerId = ownerId;

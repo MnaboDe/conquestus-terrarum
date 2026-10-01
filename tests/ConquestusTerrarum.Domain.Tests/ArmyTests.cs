@@ -10,7 +10,7 @@ public class ArmyTests
         var startLocation = Guid.NewGuid();
         var destination = Guid.NewGuid();
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             startLocation);
@@ -20,7 +20,7 @@ public class ArmyTests
             destination,
             TimeSpan.FromMinutes(10));
 
-        var startedAt = DateTimeOffset.UtcNow;
+        var startedAt = new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero);
 
         army.StartMovement(
             connection,
@@ -49,7 +49,7 @@ public class ArmyTests
         var startLocation = Guid.NewGuid();
         var destination = Guid.NewGuid();
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             startLocation);
@@ -61,7 +61,7 @@ public class ArmyTests
 
         army.StartMovement(
             connection,
-            DateTimeOffset.UtcNow);
+            new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero));
 
         army.CompleteMovement();
 
@@ -80,7 +80,7 @@ public class ArmyTests
         var b = Guid.NewGuid();
         var c = Guid.NewGuid();
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a);
@@ -97,12 +97,12 @@ public class ArmyTests
 
         army.StartMovement(
             firstConnection,
-            DateTimeOffset.UtcNow);
+            new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero));
 
         Assert.Throws<InvalidOperationException>(() =>
             army.StartMovement(
                 secondConnection,
-                DateTimeOffset.UtcNow));
+                new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero)));
     }
 
     [Fact]
@@ -110,7 +110,7 @@ public class ArmyTests
     {
         var armyLocation = Guid.NewGuid();
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             armyLocation);
@@ -123,13 +123,13 @@ public class ArmyTests
         Assert.Throws<InvalidOperationException>(() =>
             army.StartMovement(
                 connection,
-                DateTimeOffset.UtcNow));
+                new DateTimeOffset(2026, 1, 1, 10, 0, 0, TimeSpan.Zero)));
     }
 
     [Fact]
     public void CompleteMovement_WhenArmyIsNotMoving_IsRejected()
     {
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             Guid.NewGuid());

@@ -30,7 +30,7 @@ public class WorldSimulatorTests
             new[] { a, b },
             new[] { connection });
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -82,7 +82,7 @@ public class WorldSimulatorTests
             new[] { a, b },
             new[] { connection });
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -134,7 +134,7 @@ public class WorldSimulatorTests
             new[] { a, b },
             new[] { connection });
 
-        var army = new Army(
+        var army = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -195,12 +195,12 @@ public class WorldSimulatorTests
             new[] { a, b, destination },
             new[] { connectionA, connectionB });
 
-        var army1 = new Army(
+        var army1 = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
 
-        var army2 = new Army(
+        var army2 = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             b.Id);

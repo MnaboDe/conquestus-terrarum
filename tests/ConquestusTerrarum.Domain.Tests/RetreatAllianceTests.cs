@@ -72,19 +72,19 @@ public class RetreatAllianceTests
         var playerC = Guid.NewGuid();
 
         var armyA =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerA,
                 battlefield.Id);
 
         var armyC =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerC,
                 battlefield.Id);
 
         var armyB =
-            new Army(
+            TestArmies.Create(
                 Guid.NewGuid(),
                 playerB,
                 enemyStart.Id);

@@ -42,12 +42,12 @@ public class BattleTests
         var player1 = Guid.NewGuid();
         var player2 = Guid.NewGuid();
 
-        var army1 = new Army(
+        var army1 = TestArmies.Create(
             Guid.NewGuid(),
             player1,
             a.Id);
 
-        var army2 = new Army(
+        var army2 = TestArmies.Create(
             Guid.NewGuid(),
             player2,
             b.Id);
@@ -121,12 +121,12 @@ public class BattleTests
 
         var player = Guid.NewGuid();
 
-        var army1 = new Army(
+        var army1 = TestArmies.Create(
             Guid.NewGuid(),
             player,
             a.Id);
 
-        var army2 = new Army(
+        var army2 = TestArmies.Create(
             Guid.NewGuid(),
             player,
             b.Id);
@@ -180,12 +180,12 @@ public class BattleTests
             new[] { a, c },
             new[] { connection });
 
-        var defender = new Army(
+        var defender = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             c.Id);
 
-        var attacker = new Army(
+        var attacker = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
@@ -239,12 +239,12 @@ public class BattleTests
             new[] { a, b },
             new[] { connection });
 
-        var army1 = new Army(
+        var army1 = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
 
-        var army2 = new Army(
+        var army2 = TestArmies.Create(
             Guid.NewGuid(),
             Guid.NewGuid(),
             a.Id);
