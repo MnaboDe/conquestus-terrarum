@@ -2,7 +2,7 @@
 
 namespace ConquestusTerrarum.Domain.World;
 
-public sealed class Battle
+public sealed partial class Battle
 {
     private readonly List<CombatSlot> _slots = new();
     public Guid LocationId { get; }

@@ -3,7 +3,7 @@ using System.Numerics;
 namespace ConquestusTerrarum.Domain.World;
 
 /// <summary>A pairing's immutable anchors make damage independent of checkpoint frequency.</summary>
-public sealed class CombatSlot
+public sealed partial class CombatSlot
 {
     public int Index { get; }
     public Guid FirstArmyId { get; }
