@@ -47,12 +47,12 @@ that boundary and die together. No sub-tick ordering or rational timestamp syste
 is used. Positive HP rounds upward at decimal precision to avoid premature deaths; death timestamps remain authoritative.
 Zero DPS and deaths beyond the DateTimeOffset range have no scheduled boundary.
 
-The world checkpoint, units/HP, army movement/entry/retreat-lock state, active battle
-start/random state and slot anchors together describe what a future persistence
-adapter must restore. Persistence is NOT implemented yet. Battle contains the state
-that will need to be persisted, but there is currently no rehydration API for
-restoring Battle.RandomState or active CombatSlots. No PostgreSQL integration,
-persistence adapter or serialization framework is implemented in this branch.
+WorldState.CreateSnapshot() produces an immutable versioned WorldSnapshot containing
+all simulation state. WorldState.Restore(snapshot) validates and rehydrates it without
+initializing entry times, reconciling battles, reseeding RNG or refilling slots.
+Battle.RandomState, active pairings, HP anchors and retreat locks restore explicitly.
+PostgreSQL stores the snapshot as one transactional aggregate; the Domain remains
+independent from Npgsql. See [persistence setup and transaction rules](../../../db/README.md).
 
 After battle, the earliest surviving entry determines ownership. Equal earliest
 entries from different players leave OwnerId null. If there are no survivors, the
