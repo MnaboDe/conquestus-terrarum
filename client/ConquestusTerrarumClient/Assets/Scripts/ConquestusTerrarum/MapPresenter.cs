@@ -495,25 +495,140 @@ namespace ConquestusTerrarum.Client
         }
 
         private void UpdateArmySelectionVisuals()
+{
+    ArmyDto selectedArmy =
+        _controller.SelectedArmy;
+
+    foreach (
+        KeyValuePair<string, GameObject> pair
+        in _armyObjects)
+    {
+        GameObject armyObject =
+            pair.Value;
+
+        if (armyObject == null)
+            continue;
+
+        SpriteRenderer renderer =
+            armyObject.GetComponent<SpriteRenderer>();
+
+        ArmyDto army = null;
+
+        if (_presentedState != null &&
+            _presentedState.armies != null)
         {
-            foreach (
-                KeyValuePair<string, GameObject> pair
-                in _armyObjects)
-            {
-                if (pair.Value == null)
-                    continue;
-
-                bool selected =
-                    string.Equals(
-                        pair.Key,
-                        _controller.SelectedArmyId,
-                        StringComparison.Ordinal);
-
-                pair.Value.transform.localScale =
-                    Vector3.one *
-                    (selected ? 0.62f : 0.42f);
-            }
+            army =
+                _presentedState.armies
+                    .FirstOrDefault(
+                        candidate =>
+                            candidate != null &&
+                            string.Equals(
+                                candidate.id,
+                                pair.Key,
+                                StringComparison.Ordinal));
         }
+
+        if (army == null)
+            continue;
+
+        // Пока ничего не выбрано —
+        // показываем обычный цвет владельца.
+        if (selectedArmy == null)
+        {
+            armyObject.transform.localScale =
+                Vector3.one * 0.42f;
+
+            if (renderer != null)
+            {
+                renderer.color =
+                    OwnerColor(army.ownerId);
+            }
+
+            continue;
+        }
+
+        ArmyRelation relation =
+            ArmyRelations.Between(
+                _presentedState,
+                selectedArmy,
+                army);
+
+        switch (relation)
+        {
+            case ArmyRelation.Selected:
+                armyObject.transform.localScale =
+                    Vector3.one * 0.64f;
+
+                if (renderer != null)
+                {
+                    renderer.color =
+                        new Color(
+                            1f,
+                            0.85f,
+                            0.15f);
+                }
+
+                break;
+
+            case ArmyRelation.SameOwner:
+                armyObject.transform.localScale =
+                    Vector3.one * 0.48f;
+
+                if (renderer != null)
+                {
+                    renderer.color =
+                        new Color(
+                            0.25f,
+                            0.75f,
+                            1f);
+                }
+
+                break;
+
+            case ArmyRelation.Ally:
+                armyObject.transform.localScale =
+                    Vector3.one * 0.48f;
+
+                if (renderer != null)
+                {
+                    renderer.color =
+                        new Color(
+                            0.25f,
+                            0.95f,
+                            0.4f);
+                }
+
+                break;
+
+            case ArmyRelation.Hostile:
+                armyObject.transform.localScale =
+                    Vector3.one * 0.48f;
+
+                if (renderer != null)
+                {
+                    renderer.color =
+                        new Color(
+                            1f,
+                            0.25f,
+                            0.25f);
+                }
+
+                break;
+
+            default:
+                armyObject.transform.localScale =
+                    Vector3.one * 0.42f;
+
+                if (renderer != null)
+                {
+                    renderer.color =
+                        Color.white;
+                }
+
+                break;
+        }
+    }
+}
 
         private static bool HasBattle(
             MatchStateDto state,
