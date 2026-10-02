@@ -70,4 +70,28 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         Stored = working.CreateSnapshot();
         return new(value, ++Version, DatabaseTime);
     }
+    
+    public Task<MatchUpdatesPage> ReadUpdatesAsync(
+        Guid matchId,
+        long after,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        LastCancellationToken =
+            cancellationToken;
+
+        if (Failure is { } error)
+            throw error;
+
+        if (matchId != MatchId)
+            throw new MatchNotFoundException(matchId);
+
+        return Task.FromResult(
+            new MatchUpdatesPage(
+                after,
+                false,
+                Array.Empty<MatchUpdateEntry>()));
+    }
 }

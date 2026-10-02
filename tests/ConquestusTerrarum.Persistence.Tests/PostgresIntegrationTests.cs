@@ -1,7 +1,5 @@
 using ConquestusTerrarum.Domain.World;
-using ConquestusTerrarum.Testing;
 using Npgsql;
-using Xunit;
 using static ConquestusTerrarum.Testing.SnapshotWorlds;
 
 namespace ConquestusTerrarum.Persistence.Tests;
@@ -50,42 +48,53 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
 {
     private readonly WorldSnapshotSerializer _serializer = new();
     private PostgresMatchRepository Repository => new(database.DataSource);
+
     private static WorldState EmptyWorld() => new(new GameMap([new(Id(1), "Home"), new(Id(2), "Next")],
-        [new(Id(1), Id(2), TimeSpan.FromSeconds(30))]), [Army(11, 21, 1, Unit(101))], new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
+            [new(Id(1), Id(2), TimeSpan.FromSeconds(30))]), [Army(11, 21, 1, Unit(101))],
+        new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
 
     private async Task<(string Json, long Version, DateTimeOffset Created, DateTimeOffset Updated)> Row(Guid id)
     {
-        await using var command = database.DataSource.CreateCommand("SELECT state::text, version, created_at, updated_at FROM matches WHERE id = $1");
+        await using var command =
+            database.DataSource.CreateCommand(
+                "SELECT state::text, version, created_at, updated_at FROM matches WHERE id = $1");
         command.Parameters.AddWithValue(id);
         await using var reader = await command.ExecuteReaderAsync();
         Assert.True(await reader.ReadAsync());
-        return (reader.GetString(0), reader.GetInt64(1), new DateTimeOffset(reader.GetDateTime(2)), new DateTimeOffset(reader.GetDateTime(3)));
+        return (reader.GetString(0), reader.GetInt64(1), new DateTimeOffset(reader.GetDateTime(2)),
+            new DateTimeOffset(reader.GetDateTime(3)));
     }
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
     public async Task CreateStoresExactInitialState_AndCurrentReadAdvancesAndPersists()
     {
-        var id = Guid.NewGuid(); var world = Combat();
+        var id = Guid.NewGuid();
+        var world = Combat();
         await Repository.CreateAsync(id, world);
         var initial = await Row(id);
-        Assert.Equal(_serializer.Serialize(world.CreateSnapshot()), _serializer.Serialize(_serializer.Deserialize(initial.Json)));
-        Assert.Equal(0, initial.Version); Assert.Equal(initial.Created, initial.Updated);
+        Assert.Equal(_serializer.Serialize(world.CreateSnapshot()),
+            _serializer.Serialize(_serializer.Deserialize(initial.Json)));
+        Assert.Equal(0, initial.Version);
+        Assert.Equal(initial.Created, initial.Updated);
         var current = await Repository.LoadCurrentAsync(id);
         WorldSimulator.AdvanceTo(world, current.DatabaseTime);
         Assert.Equal(_serializer.Serialize(world.CreateSnapshot()), _serializer.Serialize(current.Value));
         Assert.Equal(current.DatabaseTime, current.Value.CheckpointTime);
         var persisted = await Row(id);
-        Assert.Equal(1, current.Version); Assert.Equal(1, persisted.Version);
+        Assert.Equal(1, current.Version);
+        Assert.Equal(1, persisted.Version);
         Assert.Equal(current.DatabaseTime, persisted.Updated);
-        Assert.Equal(_serializer.Serialize(current.Value), _serializer.Serialize(_serializer.Deserialize(persisted.Json)));
+        Assert.Equal(_serializer.Serialize(current.Value),
+            _serializer.Serialize(_serializer.Deserialize(persisted.Json)));
     }
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
     public async Task CapturedDatabaseTimeIsUsedForCheckpointCommandAndUpdate()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld());
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
         var result = await Repository.ExecuteAsync(id, async (world, time) =>
         {
             Assert.Equal(time, world.CheckpointTime);
@@ -95,7 +104,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
             await delay.ExecuteNonQueryAsync();
             return world.GetArmy(Id(11)).Movement!.StartedAt;
         });
-        var row = await Row(id); var snapshot = _serializer.Deserialize(row.Json);
+        var row = await Row(id);
+        var snapshot = _serializer.Deserialize(row.Json);
         Assert.Equal(result.DatabaseTime, result.Value);
         Assert.Equal(result.DatabaseTime, row.Updated);
         Assert.Equal(result.DatabaseTime, snapshot.CheckpointTime);
@@ -106,7 +116,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task ThrownOperationRollsBackBothLazyAdvanceAndCommand()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld());
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
         var before = await Row(id);
         await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.ExecuteAsync<int>(id, (world, time) =>
         {
@@ -120,7 +131,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task SameMatchOperationsWaitForRowLock_AndCaptureTimeAfterWaiting()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld());
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
         var entered = new TaskCompletionSource<DateTimeOffset>(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -149,12 +161,17 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
             await using var clock = database.DataSource.CreateCommand("SELECT clock_timestamp()");
             releaseLowerBound = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync(timeout.Token))!);
         }
-        finally { release.TrySetResult(); }
+        finally
+        {
+            release.TrySetResult();
+        }
+
         var firstResult = await first;
         var secondResult = await second;
         Assert.True(secondResult.DatabaseTime >= releaseLowerBound);
         Assert.True(secondResult.DatabaseTime >= firstResult.DatabaseTime);
-        Assert.Equal(1, firstResult.Version); Assert.Equal(2, secondResult.Version);
+        Assert.Equal(1, firstResult.Version);
+        Assert.Equal(2, secondResult.Version);
         Assert.Equal(2, (await Row(id)).Version);
     }
 
@@ -163,10 +180,10 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         while (true)
         {
             await using var command = database.DataSource.CreateCommand("""
-                SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-                WHERE datname = current_database() AND wait_event_type = 'Lock'
-                  AND query LIKE 'SELECT state::text, version FROM matches%')
-                """);
+                                                                        SELECT EXISTS (SELECT 1 FROM pg_stat_activity
+                                                                        WHERE datname = current_database() AND wait_event_type = 'Lock'
+                                                                          AND query LIKE 'SELECT state::text, version FROM matches%')
+                                                                        """);
             if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!) return;
             await Task.Delay(10, cancellationToken); // Test synchronization only; never simulation.
         }
@@ -176,27 +193,39 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task DifferentMatchesDoNotShareTheRowLock()
     {
-        var firstId = Guid.NewGuid(); var secondId = Guid.NewGuid();
-        await Repository.CreateAsync(firstId, EmptyWorld()); await Repository.CreateAsync(secondId, EmptyWorld());
+        var firstId = Guid.NewGuid();
+        var secondId = Guid.NewGuid();
+        await Repository.CreateAsync(firstId, EmptyWorld());
+        await Repository.CreateAsync(secondId, EmptyWorld());
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(10));
         var first = Repository.ExecuteAsync(firstId, async (_, _) =>
         {
-            entered.SetResult(); await release.Task.WaitAsync(timeout.Token); return 0;
+            entered.SetResult();
+            await release.Task.WaitAsync(timeout.Token);
+            return 0;
         }, timeout.Token);
         await entered.Task.WaitAsync(timeout.Token);
-        try { Assert.Equal(1, (await Repository.LoadCurrentAsync(secondId, timeout.Token)).Version); }
-        finally { release.TrySetResult(); await first; }
+        try
+        {
+            Assert.Equal(1, (await Repository.LoadCurrentAsync(secondId, timeout.Token)).Version);
+        }
+        finally
+        {
+            release.TrySetResult();
+            await first;
+        }
     }
 
     [PostgresFact]
     [Trait("Category", "Postgres")]
     public async Task MigrationsCanRunRepeatedlyAndConcurrently()
     {
-        await Task.WhenAll(new PostgresMigrator(database.DataSource).MigrateAsync(), new PostgresMigrator(database.DataSource).MigrateAsync());
+        await Task.WhenAll(new PostgresMigrator(database.DataSource).MigrateAsync(),
+            new PostgresMigrator(database.DataSource).MigrateAsync());
         await using var command = database.DataSource.CreateCommand("SELECT count(*) FROM schema_migrations");
-        Assert.Equal(1L, await command.ExecuteScalarAsync());
+        Assert.Equal(2L, await command.ExecuteScalarAsync());
     }
 
     [PostgresFact]
@@ -204,9 +233,12 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     public async Task MissingAndCorruptMatchesProduceClearErrors()
     {
         await Assert.ThrowsAsync<MatchNotFoundException>(() => Repository.LoadCurrentAsync(Guid.NewGuid()));
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld());
-        await using var corrupt = database.DataSource.CreateCommand("UPDATE matches SET state = '{}'::jsonb WHERE id = $1");
-        corrupt.Parameters.AddWithValue(id); await corrupt.ExecuteNonQueryAsync();
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
+        await using var corrupt =
+            database.DataSource.CreateCommand("UPDATE matches SET state = '{}'::jsonb WHERE id = $1");
+        corrupt.Parameters.AddWithValue(id);
+        await corrupt.ExecuteNonQueryAsync();
         await Assert.ThrowsAsync<InvalidWorldStateException>(() => Repository.LoadCurrentAsync(id));
         Assert.Equal(0, (await Row(id)).Version);
     }
@@ -215,11 +247,15 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task CancellationRollsBack()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld()); var before = await Row(id);
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
+        var before = await Row(id);
         using var cancellation = new CancellationTokenSource();
         await Assert.ThrowsAnyAsync<OperationCanceledException>(() => Repository.ExecuteAsync(id, (world, time) =>
         {
-            world.StartMovement(Id(11), Id(2), time); cancellation.Cancel(); return Task.FromResult(1);
+            world.StartMovement(Id(11), Id(2), time);
+            cancellation.Cancel();
+            return Task.FromResult(1);
         }, cancellation.Token));
         Assert.Equal(before, await Row(id));
     }
@@ -228,10 +264,13 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task CallbackCannotAdvanceToAnApplicationClockTimestamp()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld()); var before = await Row(id);
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
+        var before = await Row(id);
         await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.ExecuteAsync(id, (world, time) =>
         {
-            WorldSimulator.AdvanceTo(world, time.AddSeconds(1)); return Task.FromResult(0);
+            WorldSimulator.AdvanceTo(world, time.AddSeconds(1));
+            return Task.FromResult(0);
         }));
         Assert.Equal(before, await Row(id));
     }
@@ -240,11 +279,15 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task PersistedCheckpointAheadOfDatabaseTimeIsRejectedWithoutMutation()
     {
-        var id = Guid.NewGuid(); await Repository.CreateAsync(id, EmptyWorld());
-        var future = EmptyWorld(); WorldSimulator.AdvanceTo(future, DateTimeOffset.MaxValue);
-        await using var command = database.DataSource.CreateCommand("UPDATE matches SET state = $1::jsonb WHERE id = $2");
+        var id = Guid.NewGuid();
+        await Repository.CreateAsync(id, EmptyWorld());
+        var future = EmptyWorld();
+        WorldSimulator.AdvanceTo(future, DateTimeOffset.MaxValue);
+        await using var command =
+            database.DataSource.CreateCommand("UPDATE matches SET state = $1::jsonb WHERE id = $2");
         command.Parameters.AddWithValue(_serializer.Serialize(future.CreateSnapshot()));
-        command.Parameters.AddWithValue(id); await command.ExecuteNonQueryAsync();
+        command.Parameters.AddWithValue(id);
+        await command.ExecuteNonQueryAsync();
         var before = await Row(id);
         await Assert.ThrowsAsync<DatabaseTimeBehindWorldException>(() => Repository.LoadCurrentAsync(id));
         Assert.Equal(before, await Row(id));
@@ -254,11 +297,13 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     [Trait("Category", "Postgres")]
     public async Task CreationPreservesSubMicrosecondTimesAndDecimalExtremesInJsonb()
     {
-        var id = Guid.NewGuid(); var start = Start.AddTicks(1);
+        var id = Guid.NewGuid();
+        var start = Start.AddTicks(1);
         var connection = new MapConnection(Id(1), Id(2), TimeSpan.FromTicks(17));
         var army = Army(11, 21, 1, Unit(101, decimal.MaxValue, 0.0000000000000000000000000001m));
         army.StartMovement(connection, start);
-        var world = new WorldState(new GameMap([new(Id(1), "One"), new(Id(2), "Two")], [connection]), [army], start, randomSeed: ulong.MaxValue);
+        var world = new WorldState(new GameMap([new(Id(1), "One"), new(Id(2), "Two")], [connection]), [army], start,
+            randomSeed: ulong.MaxValue);
         await Repository.CreateAsync(id, world);
         var saved = _serializer.Deserialize((await Row(id)).Json);
         Assert.Equal(_serializer.Serialize(world.CreateSnapshot()), _serializer.Serialize(saved));
@@ -335,5 +380,156 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         await Assert.ThrowsAsync<MatchNotFoundException>(() => Repository.LoadCurrentAsync(id));
         await Repository.CreateAsync(id, time => new WorldState(new GameMap([], []), [], time));
         Assert.Equal(0, (await Row(id)).Version);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task ReadUpdatesUsesExclusiveCursorAndSupportsPaging()
+    {
+        var id = Guid.NewGuid();
+
+        await Repository.CreateAsync(
+            id,
+            EmptyWorld());
+
+        var occurredAt =
+            new DateTimeOffset(
+                2026,
+                1,
+                1,
+                12,
+                0,
+                0,
+                TimeSpan.Zero);
+
+        await using (var command =
+                     database.DataSource.CreateCommand(
+                         """
+                         INSERT INTO match_updates
+                             (match_id, sequence, occurred_at, type, payload)
+                         VALUES
+                             ($1, 1, $2, 'ArmyMovementStarted',
+                              '{"armyId":"00000000-0000-0000-0000-000000000011"}'::jsonb),
+                             ($1, 2, $2, 'ArmyArrived',
+                              '{"armyId":"00000000-0000-0000-0000-000000000011"}'::jsonb),
+                             ($1, 3, $2, 'BattleStarted',
+                              '{"locationId":"00000000-0000-0000-0000-000000000001"}'::jsonb)
+                         """))
+        {
+            command.Parameters.AddWithValue(id);
+            command.Parameters.AddWithValue(occurredAt);
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        await using (var command =
+                     database.DataSource.CreateCommand(
+                         """
+                         UPDATE matches
+                         SET next_update_sequence = 4
+                         WHERE id = $1
+                         """))
+        {
+            command.Parameters.AddWithValue(id);
+
+            await command.ExecuteNonQueryAsync();
+        }
+
+        var all =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 0);
+
+        Assert.False(all.HasMore);
+        Assert.Equal(3, all.NextCursor);
+        Assert.Equal(
+            [1L, 2L, 3L],
+            all.Updates
+                .Select(update => update.Sequence)
+                .ToArray());
+
+        Assert.Equal(
+            [
+                "ArmyMovementStarted",
+                "ArmyArrived",
+                "BattleStarted"
+            ],
+            all.Updates
+                .Select(update => update.Type)
+                .ToArray());
+
+        var afterFirst =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 1);
+
+        Assert.False(afterFirst.HasMore);
+        Assert.Equal(3, afterFirst.NextCursor);
+        Assert.Equal(
+            [2L, 3L],
+            afterFirst.Updates
+                .Select(update => update.Sequence)
+                .ToArray());
+
+        var noChanges =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 3);
+
+        Assert.False(noChanges.HasMore);
+        Assert.Equal(3, noChanges.NextCursor);
+        Assert.Empty(noChanges.Updates);
+
+        var firstPage =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 0,
+                limit: 1);
+
+        Assert.True(firstPage.HasMore);
+        Assert.Equal(1, firstPage.NextCursor);
+        Assert.Single(firstPage.Updates);
+        Assert.Equal(
+            1,
+            firstPage.Updates[0].Sequence);
+
+        var secondPage =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: firstPage.NextCursor,
+                limit: 1);
+
+        Assert.True(secondPage.HasMore);
+        Assert.Equal(2, secondPage.NextCursor);
+        Assert.Single(secondPage.Updates);
+        Assert.Equal(
+            2,
+            secondPage.Updates[0].Sequence);
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task ReadUpdatesDistinguishesMissingMatchFromEmptyFeed()
+    {
+        var existingId =
+            Guid.NewGuid();
+
+        await Repository.CreateAsync(
+            existingId,
+            EmptyWorld());
+
+        var empty =
+            await Repository.ReadUpdatesAsync(
+                existingId,
+                after: 0);
+
+        Assert.Empty(empty.Updates);
+        Assert.Equal(0, empty.NextCursor);
+        Assert.False(empty.HasMore);
+
+        await Assert.ThrowsAsync<MatchNotFoundException>(() =>
+            Repository.ReadUpdatesAsync(
+                Guid.NewGuid(),
+                after: 0));
     }
 }

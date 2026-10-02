@@ -22,11 +22,13 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
         ValidateMatchId(matchId);
         ArgumentNullException.ThrowIfNull(worldFactory);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await using var transaction =
+            await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         var now = await ReadDatabaseTimeAsync(connection, transaction, cancellationToken);
         var world = worldFactory(now) ?? throw new InvalidOperationException("The world factory returned null.");
         if (world.CheckpointTime != now)
-            throw new InvalidOperationException("The world factory must use the captured database timestamp as its initial checkpoint.");
+            throw new InvalidOperationException(
+                "The world factory must use the captured database timestamp as its initial checkpoint.");
         var json = _serializer.Serialize(world.CreateSnapshot());
         await InsertAsync(connection, transaction, matchId, json, now, cancellationToken);
         await transaction.CommitAsync(cancellationToken);
@@ -43,7 +45,8 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
         var snapshot = initialWorld.CreateSnapshot();
         var json = _serializer.Serialize(snapshot);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await using var transaction =
+            await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         var now = await ReadDatabaseTimeAsync(connection, transaction, cancellationToken);
         EnsureTimeIsNotBehind(now, snapshot.CheckpointTime);
         await InsertAsync(connection, transaction, matchId, json, now, cancellationToken);
@@ -54,9 +57,9 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
         Guid matchId, string json, DateTimeOffset databaseTime, CancellationToken cancellationToken)
     {
         await using var command = new NpgsqlCommand("""
-            INSERT INTO matches (id, state, version, created_at, updated_at)
-            VALUES ($1, $2, 0, $3, $3)
-            """, connection, transaction);
+                                                    INSERT INTO matches (id, state, version, created_at, updated_at)
+                                                    VALUES ($1, $2, 0, $3, $3)
+                                                    """, connection, transaction);
         command.Parameters.AddWithValue(matchId);
         command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, json);
         command.Parameters.AddWithValue(databaseTime);
@@ -64,7 +67,8 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
     }
 
     /// <summary>Current reads also lock, advance, save, and increment the version.</summary>
-    public Task<MatchExecutionResult<WorldSnapshot>> LoadCurrentAsync(Guid matchId, CancellationToken cancellationToken = default) =>
+    public Task<MatchExecutionResult<WorldSnapshot>> LoadCurrentAsync(Guid matchId,
+        CancellationToken cancellationToken = default) =>
         ExecuteAsync(matchId, (world, _) => Task.FromResult(world.CreateSnapshot()), cancellationToken);
 
     /// <summary>
@@ -78,10 +82,13 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
         ValidateMatchId(matchId);
         ArgumentNullException.ThrowIfNull(operation);
         await using var connection = await dataSource.OpenConnectionAsync(cancellationToken);
-        await using var transaction = await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
+        await using var transaction =
+            await connection.BeginTransactionAsync(IsolationLevel.ReadCommitted, cancellationToken);
         string json;
         long version;
-        await using (var command = new NpgsqlCommand("SELECT state::text, version FROM matches WHERE id = $1 FOR UPDATE", connection, transaction))
+        await using (var command =
+                     new NpgsqlCommand("SELECT state::text, version FROM matches WHERE id = $1 FOR UPDATE", connection,
+                         transaction))
         {
             command.Parameters.AddWithValue(matchId);
             await using var reader = await command.ExecuteReaderAsync(cancellationToken);
@@ -89,6 +96,7 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
             json = reader.GetString(0);
             version = reader.GetInt64(1);
         }
+
         // Capture once AFTER the lock wait, never at transaction start: an earlier waiter timestamp
         // could otherwise precede the checkpoint committed by the preceding lock holder.
         var now = await ReadDatabaseTimeAsync(connection, transaction, cancellationToken);
@@ -98,10 +106,13 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
         var result = await operation(world, now);
         cancellationToken.ThrowIfCancellationRequested();
         if (world.CheckpointTime != now)
-            throw new InvalidOperationException("The operation must use the captured database timestamp and must not advance beyond it.");
+            throw new InvalidOperationException(
+                "The operation must use the captured database timestamp and must not advance beyond it.");
         var state = _serializer.Serialize(world.CreateSnapshot());
         var nextVersion = checked(version + 1);
-        await using (var command = new NpgsqlCommand("UPDATE matches SET state = $1, version = $2, updated_at = $3 WHERE id = $4", connection, transaction))
+        await using (var command =
+                     new NpgsqlCommand("UPDATE matches SET state = $1, version = $2, updated_at = $3 WHERE id = $4",
+                         connection, transaction))
         {
             command.Parameters.AddWithValue(NpgsqlDbType.Jsonb, state);
             command.Parameters.AddWithValue(nextVersion);
@@ -109,8 +120,144 @@ public sealed class PostgresMatchRepository(NpgsqlDataSource dataSource) : IMatc
             command.Parameters.AddWithValue(matchId);
             await command.ExecuteNonQueryAsync(cancellationToken);
         }
+
         await transaction.CommitAsync(cancellationToken);
         return new(result, nextVersion, now);
+    }
+
+    public async Task<MatchUpdatesPage> ReadUpdatesAsync(
+        Guid matchId,
+        long after,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMatchId(matchId);
+
+        if (after < 0)
+            throw new ArgumentOutOfRangeException(
+                nameof(after),
+                "Cursor cannot be negative.");
+
+        if (limit is < 1 or > 500)
+            throw new ArgumentOutOfRangeException(
+                nameof(limit),
+                "Limit must be between 1 and 500.");
+
+        await using var connection =
+            await dataSource.OpenConnectionAsync(
+                cancellationToken);
+
+        // We need to distinguish:
+        //
+        // 1. existing match with no updates
+        // 2. nonexistent match
+        //
+        // because both would otherwise return an empty result set.
+        await using (var existsCommand =
+                     new NpgsqlCommand(
+                         """
+                         SELECT EXISTS (
+                             SELECT 1
+                             FROM matches
+                             WHERE id = $1
+                         )
+                         """,
+                         connection))
+        {
+            existsCommand.Parameters.AddWithValue(
+                matchId);
+
+            var exists =
+                (bool)(await existsCommand.ExecuteScalarAsync(
+                    cancellationToken))!;
+
+            if (!exists)
+                throw new MatchNotFoundException(matchId);
+        }
+
+        // Read one extra row so we can tell the client
+        // whether another page exists without a second count query.
+        var requestedRowCount =
+            checked(limit + 1);
+
+        await using var command =
+            new NpgsqlCommand(
+                """
+                SELECT
+                    sequence,
+                    occurred_at,
+                    type,
+                    payload::text
+                FROM match_updates
+                WHERE match_id = $1
+                  AND sequence > $2
+                ORDER BY sequence
+                LIMIT $3
+                """,
+                connection);
+
+        command.Parameters.AddWithValue(
+            matchId);
+
+        command.Parameters.AddWithValue(
+            after);
+
+        command.Parameters.AddWithValue(
+            requestedRowCount);
+
+        var entries =
+            new List<MatchUpdateEntry>(
+                requestedRowCount);
+
+        await using var reader =
+            await command.ExecuteReaderAsync(
+                cancellationToken);
+
+        while (await reader.ReadAsync(
+                   cancellationToken))
+        {
+            var sequence =
+                reader.GetInt64(0);
+
+            var occurredAtDateTime =
+                reader.GetDateTime(1);
+
+            var occurredAt =
+                new DateTimeOffset(
+                    occurredAtDateTime);
+
+            var type =
+                reader.GetString(2);
+
+            var payloadJson =
+                reader.GetString(3);
+
+            entries.Add(
+                new MatchUpdateEntry(
+                    sequence,
+                    occurredAt,
+                    type,
+                    payloadJson));
+        }
+
+        var hasMore =
+            entries.Count > limit;
+
+        if (hasMore)
+        {
+            entries.RemoveAt(
+                entries.Count - 1);
+        }
+
+        var nextCursor =
+            entries.Count == 0
+                ? after
+                : entries[^1].Sequence;
+
+        return new MatchUpdatesPage(
+            nextCursor,
+            hasMore,
+            entries);
     }
 
     private static void ValidateMatchId(Guid matchId)
