@@ -33,6 +33,10 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
     public Exception? Failure { get; set; }
     public Func<CancellationToken, Task>? BeforeExecution { get; set; }
     public CancellationToken LastCancellationToken { get; private set; }
+    
+    public List<MatchUpdateEntry> Updates { get; } = [];
+
+    public int UpdateReads { get; private set; }
 
     public Task CreateAsync(Guid matchId, Func<DateTimeOffset, WorldState> worldFactory, CancellationToken cancellationToken = default)
     {
@@ -82,16 +86,43 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         LastCancellationToken =
             cancellationToken;
 
+        UpdateReads++;
+
         if (Failure is { } error)
             throw error;
 
         if (matchId != MatchId)
             throw new MatchNotFoundException(matchId);
 
+        var matching =
+            Updates
+                .Where(
+                    update =>
+                        update.Sequence > after)
+                .OrderBy(
+                    update =>
+                        update.Sequence)
+                .Take(limit + 1)
+                .ToList();
+
+        var hasMore =
+            matching.Count > limit;
+
+        if (hasMore)
+        {
+            matching.RemoveAt(
+                matching.Count - 1);
+        }
+
+        var nextCursor =
+            matching.Count == 0
+                ? after
+                : matching[^1].Sequence;
+
         return Task.FromResult(
             new MatchUpdatesPage(
-                after,
-                false,
-                Array.Empty<MatchUpdateEntry>()));
+                nextCursor,
+                hasMore,
+                matching));
     }
 }

@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ConquestusTerrarum.Persistence")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+283e52bfdceb088b8f4768e80651f43de92de38e")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+317c782d470783e978adb6c67ecee1c426c46ba4")]
 [assembly: System.Reflection.AssemblyProductAttribute("ConquestusTerrarum.Persistence")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ConquestusTerrarum.Persistence")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]

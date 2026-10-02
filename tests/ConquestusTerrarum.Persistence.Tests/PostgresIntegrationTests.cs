@@ -1,6 +1,7 @@
 using ConquestusTerrarum.Domain.World;
 using Npgsql;
 using static ConquestusTerrarum.Testing.SnapshotWorlds;
+using System.Text.Json;
 
 namespace ConquestusTerrarum.Persistence.Tests;
 
@@ -175,17 +176,33 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         Assert.Equal(2, (await Row(id)).Version);
     }
 
-    private async Task WaitForBlockedTransaction(CancellationToken cancellationToken)
+    private async Task WaitForBlockedTransaction(
+        CancellationToken cancellationToken)
     {
         while (true)
         {
-            await using var command = database.DataSource.CreateCommand("""
-                                                                        SELECT EXISTS (SELECT 1 FROM pg_stat_activity
-                                                                        WHERE datname = current_database() AND wait_event_type = 'Lock'
-                                                                          AND query LIKE 'SELECT state::text, version FROM matches%')
-                                                                        """);
-            if ((bool)(await command.ExecuteScalarAsync(cancellationToken))!) return;
-            await Task.Delay(10, cancellationToken); // Test synchronization only; never simulation.
+            await using var command =
+                database.DataSource.CreateCommand(
+                    """
+                    SELECT EXISTS (
+                        SELECT 1
+                        FROM pg_stat_activity
+                        WHERE datname = current_database()
+                          AND wait_event_type = 'Lock'
+                          AND query ILIKE '%FROM matches%'
+                          AND query ILIKE '%FOR UPDATE%'
+                    )
+                    """);
+
+            if ((bool)(await command.ExecuteScalarAsync(
+                    cancellationToken))!)
+            {
+                return;
+            }
+
+            await Task.Delay(
+                10,
+                cancellationToken);
         }
     }
 
@@ -531,5 +548,213 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
             Repository.ReadUpdatesAsync(
                 Guid.NewGuid(),
                 after: 0));
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task MoveCommandCreatesArmyMovementStartedUpdate()
+    {
+        var id = Guid.NewGuid();
+
+        await Repository.CreateAsync(
+            id,
+            EmptyWorld());
+
+        var result =
+            await Repository.ExecuteAsync(
+                id,
+                (world, time) =>
+                {
+                    world.StartMovement(
+                        Id(11),
+                        Id(2),
+                        time);
+
+                    return Task.FromResult(0);
+                });
+
+        var page =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 0);
+
+        Assert.False(page.HasMore);
+        Assert.Equal(1, page.NextCursor);
+
+        var update =
+            Assert.Single(page.Updates);
+
+        Assert.Equal(
+            1,
+            update.Sequence);
+
+        Assert.Equal(
+            "ArmyMovementStarted",
+            update.Type);
+
+        Assert.Equal(
+            result.DatabaseTime.ToUniversalTime(),
+            update.OccurredAt.ToUniversalTime());
+
+        using var payload =
+            JsonDocument.Parse(
+                update.PayloadJson);
+
+        var root =
+            payload.RootElement;
+
+        Assert.Equal(
+            Id(11),
+            root.GetProperty("armyId").GetGuid());
+
+        Assert.Equal(
+            Id(21),
+            root.GetProperty("ownerId").GetGuid());
+
+        Assert.Equal(
+            Id(1),
+            root.GetProperty("fromLocationId").GetGuid());
+
+        Assert.Equal(
+            Id(2),
+            root.GetProperty("toLocationId").GetGuid());
+    }
+
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task LazyArrivalCreatesArrivalAndBattleStartedUpdates()
+    {
+        var id =
+            Guid.NewGuid();
+
+        await Repository.CreateAsync(
+            id,
+            databaseTime =>
+            {
+                var connection =
+                    new MapConnection(
+                        Id(1),
+                        Id(2),
+                        TimeSpan.FromMilliseconds(5));
+
+                var movingArmy =
+                    Army(
+                        11,
+                        21,
+                        1,
+                        Unit(
+                            101,
+                            dps: 0));
+
+                movingArmy.StartMovement(
+                    connection,
+                    databaseTime);
+
+                var enemyArmy =
+                    Army(
+                        12,
+                        22,
+                        2,
+                        Unit(
+                            102,
+                            dps: 0));
+
+                return new WorldState(
+                    new GameMap(
+                        [
+                            new(
+                                Id(1),
+                                "Origin"),
+                            new(
+                                Id(2),
+                                "Battlefield")
+                        ],
+                        [
+                            connection
+                        ]),
+                    [
+                        movingArmy,
+                        enemyArmy
+                    ],
+                    databaseTime,
+                    randomSeed: 123);
+            });
+
+        // Wait using PostgreSQL itself so the test does not
+        // depend on the application machine's clock.
+        await using (var delay =
+                     database.DataSource.CreateCommand(
+                         "SELECT pg_sleep(0.02)"))
+        {
+            await delay.ExecuteNonQueryAsync();
+        }
+
+        var current =
+            await Repository.LoadCurrentAsync(id);
+
+        var movingArmyAfter =
+            current.Value.Armies.Single(army =>
+                army.Id == Id(11));
+
+        Assert.Null(
+            movingArmyAfter.Movement);
+
+        Assert.Equal(
+            Id(2),
+            movingArmyAfter.LocationId);
+
+        Assert.Single(
+            current.Value.Battles);
+
+        var page =
+            await Repository.ReadUpdatesAsync(
+                id,
+                after: 0);
+
+        Assert.False(page.HasMore);
+        Assert.Equal(2, page.NextCursor);
+        Assert.Equal(2, page.Updates.Count);
+
+        Assert.Equal(
+            "ArmyArrived",
+            page.Updates[0].Type);
+
+        Assert.Equal(
+            "BattleStarted",
+            page.Updates[1].Type);
+
+        Assert.Equal(
+            1,
+            page.Updates[0].Sequence);
+
+        Assert.Equal(
+            2,
+            page.Updates[1].Sequence);
+
+        using var arrivalPayload =
+            JsonDocument.Parse(
+                page.Updates[0].PayloadJson);
+
+        Assert.Equal(
+            Id(11),
+            arrivalPayload.RootElement
+                .GetProperty("armyId")
+                .GetGuid());
+
+        Assert.Equal(
+            Id(2),
+            arrivalPayload.RootElement
+                .GetProperty("locationId")
+                .GetGuid());
+
+        using var battlePayload =
+            JsonDocument.Parse(
+                page.Updates[1].PayloadJson);
+
+        Assert.Equal(
+            Id(2),
+            battlePayload.RootElement
+                .GetProperty("locationId")
+                .GetGuid());
     }
 }
