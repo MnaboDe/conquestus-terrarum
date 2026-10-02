@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Linq;
 using UnityEngine;
 
@@ -6,6 +7,8 @@ namespace ConquestusTerrarum.Client
 {
     public sealed class MatchController : MonoBehaviour
     {
+        private const double RefreshSafetyDelaySeconds = 0.10;
+
         public MatchStateDto State { get; private set; }
 
         public string Status { get; private set; } =
@@ -17,31 +20,51 @@ namespace ConquestusTerrarum.Client
 
         public string SelectedArmyId { get; private set; }
 
-        public ArmyDto SelectedArmy =>
-            State?.armies?.FirstOrDefault(
-                army =>
-                    army != null &&
-                    string.Equals(
-                        army.id,
-                        SelectedArmyId,
-                        StringComparison.Ordinal));
+        public ArmyDto SelectedArmy
+        {
+            get
+            {
+                if (State == null || State.armies == null)
+                    return null;
+
+                return State.armies.FirstOrDefault(
+                    army =>
+                        army != null &&
+                        string.Equals(
+                            army.id,
+                            SelectedArmyId,
+                            StringComparison.Ordinal));
+            }
+        }
 
         private ConquestusApiClient _api;
 
         private DateTimeOffset _serverTimeAnchor;
         private double _realtimeAnchor;
 
+        private Coroutine _scheduledRefresh;
+        private int _stateGeneration;
+
         private void Awake()
         {
-            _api = GetComponent<ConquestusApiClient>();
+            _api =
+                GetComponent<ConquestusApiClient>();
 
             if (_api == null)
-                _api = gameObject.AddComponent<ConquestusApiClient>();
+            {
+                _api =
+                    gameObject.AddComponent<ConquestusApiClient>();
+            }
         }
 
         private void Start()
         {
             CreateDemoMatch();
+        }
+
+        private void OnDestroy()
+        {
+            CancelScheduledRefresh();
         }
 
         public DateTimeOffset PresentationServerTime
@@ -51,11 +74,12 @@ namespace ConquestusTerrarum.Client
                 if (State == null)
                     return default;
 
-                var elapsed =
+                double elapsed =
                     Time.realtimeSinceStartupAsDouble -
                     _realtimeAnchor;
 
-                return _serverTimeAnchor.AddSeconds(elapsed);
+                return _serverTimeAnchor.AddSeconds(
+                    elapsed);
             }
         }
 
@@ -63,6 +87,8 @@ namespace ConquestusTerrarum.Client
         {
             if (IsBusy)
                 return;
+
+            CancelScheduledRefresh();
 
             IsBusy = true;
             SelectedArmyId = null;
@@ -79,26 +105,28 @@ namespace ConquestusTerrarum.Client
         {
             if (IsBusy ||
                 State == null ||
-                string.IsNullOrWhiteSpace(State.matchId))
+                string.IsNullOrWhiteSpace(
+                    State.matchId))
+            {
                 return;
+            }
 
-            IsBusy = true;
-            LastError = null;
-            Status = "Refreshing...";
+            CancelScheduledRefresh();
 
-            StartCoroutine(
-                _api.GetMatch(
-                    State.matchId,
-                    ApplyState,
-                    HandleError));
+            BeginRefresh(
+                "Refreshing...");
         }
 
-        public void SelectArmy(string armyId)
+        public void SelectArmy(
+            string armyId)
         {
-            if (State?.armies == null)
+            if (State == null ||
+                State.armies == null)
+            {
                 return;
+            }
 
-            var army =
+            ArmyDto army =
                 State.armies.FirstOrDefault(
                     candidate =>
                         candidate != null &&
@@ -113,31 +141,40 @@ namespace ConquestusTerrarum.Client
             SelectedArmyId = army.id;
 
             Status =
-                $"Selected army {ShortId(army.id)}";
+                "Selected army " +
+                ShortId(army.id);
         }
 
-        public void ClickLocation(string locationId)
+        public void ClickLocation(
+            string locationId)
         {
             if (IsBusy)
                 return;
 
-            var army = SelectedArmy;
+            ArmyDto army =
+                SelectedArmy;
 
             if (army == null)
             {
-                Status = "Select an army first.";
+                Status =
+                    "Select an army first.";
+
                 return;
             }
 
             if (army.isDestroyed)
             {
-                Status = "Destroyed army cannot move.";
+                Status =
+                    "Destroyed army cannot move.";
+
                 return;
             }
 
             if (army.isMoving)
             {
-                Status = "Army is already moving.";
+                Status =
+                    "Army is already moving.";
+
                 return;
             }
 
@@ -149,9 +186,12 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
-            if (string.IsNullOrWhiteSpace(army.locationId))
+            if (string.IsNullOrWhiteSpace(
+                    army.locationId))
             {
-                Status = "Army has no current location.";
+                Status =
+                    "Army has no current location.";
+
                 return;
             }
 
@@ -173,7 +213,8 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
-            MoveSelectedArmy(locationId);
+            MoveSelectedArmy(
+                locationId);
         }
 
         public void RetreatSelectedArmy()
@@ -181,10 +222,16 @@ namespace ConquestusTerrarum.Client
             if (IsBusy)
                 return;
 
-            var army = SelectedArmy;
+            ArmyDto army =
+                SelectedArmy;
 
-            if (army == null || !army.canRetreat)
+            if (army == null ||
+                !army.canRetreat)
+            {
                 return;
+            }
+
+            CancelScheduledRefresh();
 
             IsBusy = true;
             LastError = null;
@@ -201,14 +248,18 @@ namespace ConquestusTerrarum.Client
         private void MoveSelectedArmy(
             string destinationLocationId)
         {
-            var army = SelectedArmy;
+            ArmyDto army =
+                SelectedArmy;
 
             if (army == null)
                 return;
 
+            CancelScheduledRefresh();
+
             IsBusy = true;
             LastError = null;
-            Status = "Sending move command...";
+            Status =
+                "Sending move command...";
 
             StartCoroutine(
                 _api.MoveArmy(
@@ -219,12 +270,36 @@ namespace ConquestusTerrarum.Client
                     HandleError));
         }
 
+        private void BeginRefresh(
+            string status)
+        {
+            if (State == null ||
+                string.IsNullOrWhiteSpace(
+                    State.matchId))
+            {
+                return;
+            }
+
+            IsBusy = true;
+            LastError = null;
+            Status = status;
+
+            StartCoroutine(
+                _api.GetMatch(
+                    State.matchId,
+                    ApplyState,
+                    HandleError));
+        }
+
         private bool IsConnected(
             string firstLocationId,
             string secondLocationId)
         {
-            if (State?.connections == null)
+            if (State == null ||
+                State.connections == null)
+            {
                 return false;
+            }
 
             return State.connections.Any(
                 connection =>
@@ -250,8 +325,11 @@ namespace ConquestusTerrarum.Client
                     ));
         }
 
-        private void ApplyState(MatchStateDto state)
+        private void ApplyState(
+            MatchStateDto state)
         {
+            CancelScheduledRefresh();
+
             State = state;
 
             if (!DateTimeOffset.TryParse(
@@ -264,33 +342,55 @@ namespace ConquestusTerrarum.Client
             _realtimeAnchor =
                 Time.realtimeSinceStartupAsDouble;
 
-            if (!string.IsNullOrWhiteSpace(SelectedArmyId) &&
-                (state.armies == null ||
-                 !state.armies.Any(
-                     army =>
-                         army != null &&
-                         string.Equals(
-                             army.id,
-                             SelectedArmyId,
-                             StringComparison.Ordinal))))
+            _stateGeneration++;
+
+            if (!string.IsNullOrWhiteSpace(
+                    SelectedArmyId))
             {
-                SelectedArmyId = null;
+                bool selectedStillExists =
+                    state.armies != null &&
+                    state.armies.Any(
+                        army =>
+                            army != null &&
+                            string.Equals(
+                                army.id,
+                                SelectedArmyId,
+                                StringComparison.Ordinal));
+
+                if (!selectedStillExists)
+                {
+                    SelectedArmyId = null;
+                }
             }
 
             IsBusy = false;
             LastError = null;
 
             Status =
-                $"Connected. Version {state.version}";
+                "Connected. Version " +
+                state.version;
 
             Debug.Log(
-                $"Match {state.matchId}: " +
-                $"{state.locations?.Length ?? 0} locations, " +
-                $"{state.armies?.Length ?? 0} armies.");
+                "Match " +
+                state.matchId +
+                ": " +
+                (state.locations != null
+                    ? state.locations.Length
+                    : 0) +
+                " locations, " +
+                (state.armies != null
+                    ? state.armies.Length
+                    : 0) +
+                " armies.");
+
+            ScheduleNextKnownEvent();
         }
 
-        private void HandleError(string error)
+        private void HandleError(
+            string error)
         {
+            CancelScheduledRefresh();
+
             IsBusy = false;
             LastError = error;
             Status = "Request failed.";
@@ -298,14 +398,192 @@ namespace ConquestusTerrarum.Client
             Debug.LogError(error);
         }
 
-        private static string ShortId(string id)
+        private void ScheduleNextKnownEvent()
+        {
+            if (State == null)
+                return;
+
+            DateTimeOffset? nextEvent =
+                FindEarliestKnownFutureEvent(
+                    State);
+
+            if (!nextEvent.HasValue)
+                return;
+
+            int generation =
+                _stateGeneration;
+
+            _scheduledRefresh =
+                StartCoroutine(
+                    WaitForKnownEventAndRefresh(
+                        nextEvent.Value,
+                        generation));
+        }
+
+        private IEnumerator WaitForKnownEventAndRefresh(
+            DateTimeOffset eventTime,
+            int expectedGeneration)
+        {
+            double secondsUntilEvent =
+                (eventTime -
+                 PresentationServerTime)
+                .TotalSeconds;
+
+            double delay =
+                Math.Max(
+                    0.05,
+                    secondsUntilEvent +
+                    RefreshSafetyDelaySeconds);
+
+            Debug.Log(
+                "Next authoritative refresh in " +
+                delay.ToString("0.00") +
+                "s for event at " +
+                eventTime.ToString("O"));
+
+            yield return new WaitForSecondsRealtime(
+                (float)delay);
+
+            if (expectedGeneration !=
+                _stateGeneration)
+            {
+                yield break;
+            }
+
+            if (IsBusy ||
+                State == null)
+            {
+                yield break;
+            }
+
+            // Coroutine больше не считается
+            // запланированной до начала GET.
+            _scheduledRefresh = null;
+
+            BeginRefresh(
+                "Refreshing after server event...");
+        }
+
+        private static DateTimeOffset?
+            FindEarliestKnownFutureEvent(
+                MatchStateDto state)
+        {
+            DateTimeOffset serverTime;
+
+            if (!DateTimeOffset.TryParse(
+                    state.serverTime,
+                    out serverTime))
+            {
+                return null;
+            }
+
+            DateTimeOffset? earliest =
+                null;
+
+            if (state.armies != null)
+            {
+                foreach (ArmyDto army
+                         in state.armies)
+                {
+                    if (army == null ||
+                        !army.isMoving ||
+                        army.movement == null)
+                    {
+                        continue;
+                    }
+
+                    ConsiderTimestamp(
+                        army.movement.arriveAt,
+                        serverTime,
+                        ref earliest);
+                }
+            }
+
+            if (state.activeBattles != null)
+            {
+                foreach (BattleDto battle
+                         in state.activeBattles)
+                {
+                    if (battle == null ||
+                        battle.combatSlots == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (CombatSlotDto slot
+                             in battle.combatSlots)
+                    {
+                        if (slot == null)
+                            continue;
+
+                        ConsiderTimestamp(
+                            slot.firstDeathAt,
+                            serverTime,
+                            ref earliest);
+
+                        ConsiderTimestamp(
+                            slot.secondDeathAt,
+                            serverTime,
+                            ref earliest);
+                    }
+                }
+            }
+
+            return earliest;
+        }
+
+        private static void ConsiderTimestamp(
+            string value,
+            DateTimeOffset serverTime,
+            ref DateTimeOffset? earliest)
+        {
+            if (string.IsNullOrWhiteSpace(
+                    value))
+            {
+                return;
+            }
+
+            DateTimeOffset parsed;
+
+            if (!DateTimeOffset.TryParse(
+                    value,
+                    out parsed))
+            {
+                return;
+            }
+
+            // Уже обработанные события не должны
+            // создавать бесконечные GET циклы.
+            if (parsed <= serverTime)
+                return;
+
+            if (!earliest.HasValue ||
+                parsed < earliest.Value)
+            {
+                earliest = parsed;
+            }
+        }
+
+        private void CancelScheduledRefresh()
+        {
+            if (_scheduledRefresh == null)
+                return;
+
+            StopCoroutine(
+                _scheduledRefresh);
+
+            _scheduledRefresh = null;
+        }
+
+        private static string ShortId(
+            string id)
         {
             if (string.IsNullOrWhiteSpace(id))
                 return "?";
 
             return id.Length <= 6
                 ? id
-                : id[..6];
+                : id.Substring(0, 6);
         }
     }
 }
