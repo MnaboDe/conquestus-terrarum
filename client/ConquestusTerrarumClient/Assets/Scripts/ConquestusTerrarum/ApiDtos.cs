@@ -135,5 +135,38 @@ namespace ConquestusTerrarum.Client
         public long sequence;
         public string occurredAt;
         public string type;
+        public MatchUpdatePayloadDto payload;
+    }
+
+    [Serializable]
+    public class MatchUpdatePayloadDto
+    {
+        public string armyId;
+        public string ownerId;
+
+        public string fromLocationId;
+        public string toLocationId;
+        public string startedAt;
+        public string arriveAt;
+
+        public string locationId;
+        public string movementKind;
+
+        public string previousOwnerId;
+    }
+    
+    [Serializable]
+    public class ArmyDetailsDto
+    {
+        public string serverTime;
+        public string armyId;
+
+        public bool isDestroyed;
+        public bool isInBattle;
+        public bool canRetreat;
+
+        public string retreatLocationId;
+
+        public UnitDto[] units;
     }
 }

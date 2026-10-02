@@ -21,6 +21,16 @@ public interface IMatchRepository
         Func<WorldState, DateTimeOffset, Task<T>> operation,
         CancellationToken cancellationToken = default);
 
+    /// <summary>
+    /// Advances the world to current database time for a read-only projection.
+    /// Continuous state changes are not persisted unless a meaningful
+    /// client-visible transition is crossed.
+    /// </summary>
+    Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(
+        Guid matchId,
+        Func<WorldSnapshot, DateTimeOffset, T> query,
+        CancellationToken cancellationToken = default);
+
     Task<MatchUpdatesPage> ReadUpdatesAsync(
         Guid matchId,
         long after,

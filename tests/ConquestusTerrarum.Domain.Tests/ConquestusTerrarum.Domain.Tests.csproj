@@ -19,7 +19,7 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\..\src\ConquestusTerrarum.Domain\ConquestusTerrarum.Domain.csproj" />
+        <ProjectReference Include="..\..\src\ConquestusTerrarum.Domain\ConquestusTerrarum.Domain.csproj"/>
     </ItemGroup>
 
 </Project>

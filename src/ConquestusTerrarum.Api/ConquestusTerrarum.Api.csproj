@@ -11,8 +11,8 @@
     </ItemGroup>
 
     <ItemGroup>
-      <ProjectReference Include="..\ConquestusTerrarum.Domain\ConquestusTerrarum.Domain.csproj" />
-      <ProjectReference Include="..\ConquestusTerrarum.Persistence\ConquestusTerrarum.Persistence.csproj" />
+        <ProjectReference Include="..\ConquestusTerrarum.Domain\ConquestusTerrarum.Domain.csproj"/>
+        <ProjectReference Include="..\ConquestusTerrarum.Persistence\ConquestusTerrarum.Persistence.csproj"/>
     </ItemGroup>
 
 </Project>

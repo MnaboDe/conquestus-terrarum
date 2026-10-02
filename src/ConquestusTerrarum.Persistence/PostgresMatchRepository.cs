@@ -12,8 +12,8 @@ public sealed record MatchExecutionResult<T>(
     long UpdateCursor = 0);
 
 /// <summary>
-/// One row and one transaction per match.
-/// The caller owns the reusable data source.
+///     One row and one transaction per match.
+///     The caller owns the reusable data source.
 /// </summary>
 public sealed class PostgresMatchRepository(
     NpgsqlDataSource dataSource) : IMatchRepository
@@ -21,8 +21,8 @@ public sealed class PostgresMatchRepository(
     private readonly WorldSnapshotSerializer _serializer = new();
 
     /// <summary>
-    /// Normal production creation: the factory constructs the world
-    /// at the captured database time.
+    ///     Normal production creation: the factory constructs the world
+    ///     at the captured database time.
     /// </summary>
     public async Task CreateAsync(
         Guid matchId,
@@ -53,10 +53,8 @@ public sealed class PostgresMatchRepository(
                 "The world factory returned null.");
 
         if (world.CheckpointTime != now)
-        {
             throw new InvalidOperationException(
                 "The world factory must use the captured database timestamp as its initial checkpoint.");
-        }
 
         var json =
             _serializer.Serialize(
@@ -75,89 +73,8 @@ public sealed class PostgresMatchRepository(
     }
 
     /// <summary>
-    /// Exact snapshot insertion for imports/tests.
-    /// </summary>
-    public async Task CreateAsync(
-        Guid matchId,
-        WorldState initialWorld,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateMatchId(matchId);
-        ArgumentNullException.ThrowIfNull(initialWorld);
-
-        var snapshot =
-            initialWorld.CreateSnapshot();
-
-        var json =
-            _serializer.Serialize(snapshot);
-
-        await using var connection =
-            await dataSource.OpenConnectionAsync(
-                cancellationToken);
-
-        await using var transaction =
-            await connection.BeginTransactionAsync(
-                IsolationLevel.ReadCommitted,
-                cancellationToken);
-
-        var now =
-            await ReadDatabaseTimeAsync(
-                connection,
-                transaction,
-                cancellationToken);
-
-        EnsureTimeIsNotBehind(
-            now,
-            snapshot.CheckpointTime);
-
-        await InsertAsync(
-            connection,
-            transaction,
-            matchId,
-            json,
-            now,
-            cancellationToken);
-
-        await transaction.CommitAsync(
-            cancellationToken);
-    }
-
-    private static async Task InsertAsync(
-        NpgsqlConnection connection,
-        NpgsqlTransaction transaction,
-        Guid matchId,
-        string json,
-        DateTimeOffset databaseTime,
-        CancellationToken cancellationToken)
-    {
-        await using var command =
-            new NpgsqlCommand(
-                """
-                INSERT INTO matches
-                    (id, state, version, created_at, updated_at)
-                VALUES
-                    ($1, $2, 0, $3, $3)
-                """,
-                connection,
-                transaction);
-
-        command.Parameters.AddWithValue(
-            matchId);
-
-        command.Parameters.AddWithValue(
-            NpgsqlDbType.Jsonb,
-            json);
-
-        command.Parameters.AddWithValue(
-            databaseTime);
-
-        await command.ExecuteNonQueryAsync(
-            cancellationToken);
-    }
-
-    /// <summary>
-    /// Current reads also lock, advance, save,
-    /// generate coarse client updates and increment the version.
+    ///     Current reads also lock, advance, save,
+    ///     generate coarse client updates and increment the version.
     /// </summary>
     public Task<MatchExecutionResult<WorldSnapshot>>
         LoadCurrentAsync(
@@ -173,11 +90,10 @@ public sealed class PostgresMatchRepository(
     }
 
     /// <summary>
-    /// Executes lazy simulation and an optional command under
-    /// one match-row lock.
-    ///
-    /// Snapshot state and client change-feed entries are committed
-    /// atomically in the same PostgreSQL transaction.
+    ///     Executes lazy simulation and an optional command under
+    ///     one match-row lock.
+    ///     Snapshot state and client change-feed entries are committed
+    ///     atomically in the same PostgreSQL transaction.
     /// </summary>
     public async Task<MatchExecutionResult<T>> ExecuteAsync<T>(
         Guid matchId,
@@ -223,10 +139,8 @@ public sealed class PostgresMatchRepository(
 
             if (!await reader.ReadAsync(
                     cancellationToken))
-            {
                 throw new MatchNotFoundException(
                     matchId);
-            }
 
             json =
                 reader.GetString(0);
@@ -270,10 +184,8 @@ public sealed class PostgresMatchRepository(
         cancellationToken.ThrowIfCancellationRequested();
 
         if (world.CheckpointTime != now)
-        {
             throw new InvalidOperationException(
                 "The operation must use the captured database timestamp and must not advance beyond it.");
-        }
 
         var after =
             world.CreateSnapshot();
@@ -350,19 +262,188 @@ public sealed class PostgresMatchRepository(
             now,
             checked(sequence - 1));
     }
+    
+    public async Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(
+    Guid matchId,
+    Func<WorldSnapshot, DateTimeOffset, T> query,
+    CancellationToken cancellationToken = default)
+{
+    ValidateMatchId(matchId);
+    ArgumentNullException.ThrowIfNull(query);
+
+    await using var connection =
+        await dataSource.OpenConnectionAsync(
+            cancellationToken);
+
+    await using var transaction =
+        await connection.BeginTransactionAsync(
+            IsolationLevel.ReadCommitted,
+            cancellationToken);
+
+    string json;
+    long version;
+    long nextUpdateSequence;
+
+    await using (var command =
+                 new NpgsqlCommand(
+                     """
+                     SELECT
+                         state::text,
+                         version,
+                         next_update_sequence
+                     FROM matches
+                     WHERE id = $1
+                     FOR UPDATE
+                     """,
+                     connection,
+                     transaction))
+    {
+        command.Parameters.AddWithValue(
+            matchId);
+
+        await using var reader =
+            await command.ExecuteReaderAsync(
+                cancellationToken);
+
+        if (!await reader.ReadAsync(
+                cancellationToken))
+        {
+            throw new MatchNotFoundException(
+                matchId);
+        }
+
+        json =
+            reader.GetString(0);
+
+        version =
+            reader.GetInt64(1);
+
+        nextUpdateSequence =
+            reader.GetInt64(2);
+    }
+
+    var now =
+        await ReadDatabaseTimeAsync(
+            connection,
+            transaction,
+            cancellationToken);
+
+    var world =
+        WorldState.Restore(
+            _serializer.Deserialize(json));
+
+    EnsureTimeIsNotBehind(
+        now,
+        world.CheckpointTime);
+
+    var before =
+        world.CreateSnapshot();
+
+    WorldSimulator.AdvanceTo(
+        world,
+        now);
+
+    var after =
+        world.CreateSnapshot();
+
+    var value =
+        query(
+            after,
+            now);
+
+    var generatedUpdates =
+        WorldUpdateDetector.Detect(
+            before,
+            after,
+            now);
+
+    var sequence =
+        nextUpdateSequence;
+
+    foreach (var update in generatedUpdates)
+    {
+        await InsertUpdateAsync(
+            connection,
+            transaction,
+            matchId,
+            sequence,
+            update,
+            cancellationToken);
+
+        sequence =
+            checked(sequence + 1);
+    }
+
+    var resultVersion =
+        version;
+
+    // Important:
+    // continuous HP/checkpoint changes alone do not cause a DB write.
+    //
+    // If we crossed a meaningful boundary, however, we must persist
+    // both the authoritative snapshot and its change-feed entries.
+    if (generatedUpdates.Count != 0)
+    {
+        var state =
+            _serializer.Serialize(after);
+
+        resultVersion =
+            checked(version + 1);
+
+        await using var updateCommand =
+            new NpgsqlCommand(
+                """
+                UPDATE matches
+                SET
+                    state = $1,
+                    version = $2,
+                    updated_at = $3,
+                    next_update_sequence = $4
+                WHERE id = $5
+                """,
+                connection,
+                transaction);
+
+        updateCommand.Parameters.AddWithValue(
+            NpgsqlDbType.Jsonb,
+            state);
+
+        updateCommand.Parameters.AddWithValue(
+            resultVersion);
+
+        updateCommand.Parameters.AddWithValue(
+            now);
+
+        updateCommand.Parameters.AddWithValue(
+            sequence);
+
+        updateCommand.Parameters.AddWithValue(
+            matchId);
+
+        await updateCommand.ExecuteNonQueryAsync(
+            cancellationToken);
+    }
+
+    await transaction.CommitAsync(
+        cancellationToken);
+
+    return new MatchExecutionResult<T>(
+        value,
+        resultVersion,
+        now,
+        checked(sequence - 1));
+}
 
     /// <summary>
-    /// Polls the durable change feed.
-    ///
-    /// Polling also wakes lazy simulation. If crossing the current
-    /// database time produces a meaningful client-visible transition,
-    /// the advanced snapshot and generated updates are persisted
-    /// atomically before the feed is returned.
-    ///
-    /// If simulation only changes continuous state such as battle HP
-    /// and checkpoint time, no snapshot write is performed. That interval
-    /// can be recomputed deterministically by the next authoritative
-    /// operation.
+    ///     Polls the durable change feed.
+    ///     Polling also wakes lazy simulation. If crossing the current
+    ///     database time produces a meaningful client-visible transition,
+    ///     the advanced snapshot and generated updates are persisted
+    ///     atomically before the feed is returned.
+    ///     If simulation only changes continuous state such as battle HP
+    ///     and checkpoint time, no snapshot write is performed. That interval
+    ///     can be recomputed deterministically by the next authoritative
+    ///     operation.
     /// </summary>
     public async Task<MatchUpdatesPage> ReadUpdatesAsync(
         Guid matchId,
@@ -373,18 +454,14 @@ public sealed class PostgresMatchRepository(
         ValidateMatchId(matchId);
 
         if (after < 0)
-        {
             throw new ArgumentOutOfRangeException(
                 nameof(after),
                 "Cursor cannot be negative.");
-        }
 
         if (limit is < 1 or > 500)
-        {
             throw new ArgumentOutOfRangeException(
                 nameof(limit),
                 "Limit must be between 1 and 500.");
-        }
 
         await using var connection =
             await dataSource.OpenConnectionAsync(
@@ -425,10 +502,8 @@ public sealed class PostgresMatchRepository(
 
             if (!await reader.ReadAsync(
                     cancellationToken))
-            {
                 throw new MatchNotFoundException(
                     matchId);
-            }
 
             json =
                 reader.GetString(0);
@@ -577,7 +652,6 @@ public sealed class PostgresMatchRepository(
         {
             while (await reader.ReadAsync(
                        cancellationToken))
-            {
                 entries.Add(
                     new MatchUpdateEntry(
                         reader.GetInt64(0),
@@ -585,17 +659,14 @@ public sealed class PostgresMatchRepository(
                             reader.GetDateTime(1)),
                         reader.GetString(2),
                         reader.GetString(3)));
-            }
         }
 
         var hasMore =
             entries.Count > limit;
 
         if (hasMore)
-        {
             entries.RemoveAt(
                 entries.Count - 1);
-        }
 
         var nextCursor =
             entries.Count == 0
@@ -609,6 +680,87 @@ public sealed class PostgresMatchRepository(
             nextCursor,
             hasMore,
             entries);
+    }
+
+    /// <summary>
+    ///     Exact snapshot insertion for imports/tests.
+    /// </summary>
+    public async Task CreateAsync(
+        Guid matchId,
+        WorldState initialWorld,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMatchId(matchId);
+        ArgumentNullException.ThrowIfNull(initialWorld);
+
+        var snapshot =
+            initialWorld.CreateSnapshot();
+
+        var json =
+            _serializer.Serialize(snapshot);
+
+        await using var connection =
+            await dataSource.OpenConnectionAsync(
+                cancellationToken);
+
+        await using var transaction =
+            await connection.BeginTransactionAsync(
+                IsolationLevel.ReadCommitted,
+                cancellationToken);
+
+        var now =
+            await ReadDatabaseTimeAsync(
+                connection,
+                transaction,
+                cancellationToken);
+
+        EnsureTimeIsNotBehind(
+            now,
+            snapshot.CheckpointTime);
+
+        await InsertAsync(
+            connection,
+            transaction,
+            matchId,
+            json,
+            now,
+            cancellationToken);
+
+        await transaction.CommitAsync(
+            cancellationToken);
+    }
+
+    private static async Task InsertAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid matchId,
+        string json,
+        DateTimeOffset databaseTime,
+        CancellationToken cancellationToken)
+    {
+        await using var command =
+            new NpgsqlCommand(
+                """
+                INSERT INTO matches
+                    (id, state, version, created_at, updated_at)
+                VALUES
+                    ($1, $2, 0, $3, $3)
+                """,
+                connection,
+                transaction);
+
+        command.Parameters.AddWithValue(
+            matchId);
+
+        command.Parameters.AddWithValue(
+            NpgsqlDbType.Jsonb,
+            json);
+
+        command.Parameters.AddWithValue(
+            databaseTime);
+
+        await command.ExecuteNonQueryAsync(
+            cancellationToken);
     }
 
     private static async Task InsertUpdateAsync(
@@ -661,11 +813,9 @@ public sealed class PostgresMatchRepository(
         Guid matchId)
     {
         if (matchId == Guid.Empty)
-        {
             throw new ArgumentException(
                 "Match id cannot be empty.",
                 nameof(matchId));
-        }
     }
 
     private static void EnsureTimeIsNotBehind(
@@ -673,11 +823,9 @@ public sealed class PostgresMatchRepository(
         DateTimeOffset checkpoint)
     {
         if (now < checkpoint)
-        {
             throw new DatabaseTimeBehindWorldException(
                 now,
                 checkpoint);
-        }
     }
 
     private static async Task<DateTimeOffset>

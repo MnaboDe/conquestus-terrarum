@@ -26,13 +26,15 @@ public sealed class WorldSnapshotSerializer
         try
         {
             var snapshot = JsonSerializer.Deserialize<WorldSnapshot>(json, Options)
-                ?? throw new JsonException("The world snapshot is null.");
+                           ?? throw new JsonException("The world snapshot is null.");
             WorldState.Restore(snapshot);
             return snapshot;
         }
-        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException or OverflowException)
+        catch (Exception ex) when (ex is JsonException or ArgumentException or InvalidOperationException
+                                       or OverflowException)
         {
-            throw new InvalidWorldStateException("The stored world snapshot is invalid or uses an unsupported format.", ex);
+            throw new InvalidWorldStateException("The stored world snapshot is invalid or uses an unsupported format.",
+                ex);
         }
     }
 }

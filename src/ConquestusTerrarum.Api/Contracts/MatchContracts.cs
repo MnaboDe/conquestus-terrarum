@@ -84,3 +84,12 @@ public sealed record MatchUpdateResponse(
     DateTimeOffset OccurredAt,
     string Type,
     JsonElement Payload);
+
+public sealed record ArmyDetailsResponse(
+    DateTimeOffset ServerTime,
+    Guid ArmyId,
+    bool IsDestroyed,
+    bool IsInBattle,
+    bool CanRetreat,
+    Guid? RetreatLocationId,
+    IReadOnlyList<UnitResponse> Units);

@@ -4,8 +4,8 @@ using ConquestusTerrarum.Domain.World;
 namespace ConquestusTerrarum.Persistence;
 
 /// <summary>
-/// A change detected between two authoritative world snapshots,
-/// but not yet assigned a durable per-match sequence.
+///     A change detected between two authoritative world snapshots,
+///     but not yet assigned a durable per-match sequence.
 /// </summary>
 public sealed record PendingMatchUpdate(
     DateTimeOffset OccurredAt,
@@ -13,11 +13,10 @@ public sealed record PendingMatchUpdate(
     string PayloadJson);
 
 /// <summary>
-/// Produces coarse client-facing map updates from authoritative snapshots.
-///
-/// This is deliberately NOT an event-sourcing log.
-/// It describes meaningful observable state changes for client synchronization.
-/// Continuous HP changes are intentionally omitted.
+///     Produces coarse client-facing map updates from authoritative snapshots.
+///     This is deliberately NOT an event-sourcing log.
+///     It describes meaningful observable state changes for client synchronization.
+///     Continuous HP changes are intentionally omitted.
 /// </summary>
 public static class WorldUpdateDetector
 {
@@ -70,17 +69,14 @@ public static class WorldUpdateDetector
         ICollection<PendingMatchUpdate> updates)
     {
         var beforeArmies =
-            before.Armies.ToDictionary(
-                army => army.Id);
+            before.Armies.ToDictionary(army => army.Id);
 
         foreach (var afterArmy in after.Armies)
         {
             if (!beforeArmies.TryGetValue(
                     afterArmy.Id,
                     out var beforeArmy))
-            {
                 continue;
-            }
 
             DetectMovementStarted(
                 beforeArmy,
@@ -107,9 +103,7 @@ public static class WorldUpdateDetector
     {
         if (before.Movement is not null ||
             after.Movement is null)
-        {
             return;
-        }
 
         var movement =
             after.Movement;
@@ -149,18 +143,14 @@ public static class WorldUpdateDetector
     {
         if (before.Movement is null ||
             after.Movement is not null)
-        {
             return;
-        }
 
         var movement =
             before.Movement;
 
         if (after.LocationId !=
             movement.ToLocationId)
-        {
             return;
-        }
 
         var payload =
             JsonSerializer.Serialize(
@@ -189,9 +179,7 @@ public static class WorldUpdateDetector
     {
         if (IsDestroyed(before) ||
             !IsDestroyed(after))
-        {
             return;
-        }
 
         // If the army was moving when a long lazy advance began,
         // its eventual battle location is the movement destination.
@@ -222,20 +210,16 @@ public static class WorldUpdateDetector
         ICollection<PendingMatchUpdate> updates)
     {
         var beforeBattles =
-            before.Battles.ToDictionary(
-                battle => battle.LocationId);
+            before.Battles.ToDictionary(battle => battle.LocationId);
 
         var afterBattles =
-            after.Battles.ToDictionary(
-                battle => battle.LocationId);
+            after.Battles.ToDictionary(battle => battle.LocationId);
 
         foreach (var battle in after.Battles)
         {
             if (beforeBattles.ContainsKey(
                     battle.LocationId))
-            {
                 continue;
-            }
 
             var payload =
                 JsonSerializer.Serialize(
@@ -256,9 +240,7 @@ public static class WorldUpdateDetector
         {
             if (afterBattles.ContainsKey(
                     battle.LocationId))
-            {
                 continue;
-            }
 
             var payload =
                 JsonSerializer.Serialize(
@@ -283,8 +265,7 @@ public static class WorldUpdateDetector
         ICollection<PendingMatchUpdate> updates)
     {
         var beforeLocations =
-            before.Locations.ToDictionary(
-                location => location.Id);
+            before.Locations.ToDictionary(location => location.Id);
 
         foreach (var afterLocation
                  in after.Locations)
@@ -292,15 +273,11 @@ public static class WorldUpdateDetector
             if (!beforeLocations.TryGetValue(
                     afterLocation.Id,
                     out var beforeLocation))
-            {
                 continue;
-            }
 
             if (beforeLocation.OwnerId ==
                 afterLocation.OwnerId)
-            {
                 continue;
-            }
 
             var payload =
                 JsonSerializer.Serialize(
@@ -325,8 +302,7 @@ public static class WorldUpdateDetector
     private static bool IsDestroyed(
         ArmySnapshot army)
     {
-        return !army.Units.Any(
-            unit =>
-                unit.CurrentHitPoints > 0m);
+        return !army.Units.Any(unit =>
+            unit.CurrentHitPoints > 0m);
     }
 }

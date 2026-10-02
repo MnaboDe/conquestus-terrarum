@@ -15,14 +15,25 @@ public static class DemoWorldFactory
         var secondPlayer = Guid.NewGuid();
         var ally = Guid.NewGuid();
         var map = new GameMap([west, center, east, north],
-            [new(west.Id, center.Id, TimeSpan.FromSeconds(5)), new(center.Id, east.Id, TimeSpan.FromSeconds(5)),
-             new(center.Id, north.Id, TimeSpan.FromSeconds(8)), new(west.Id, north.Id, TimeSpan.FromSeconds(12))]);
+        [
+            new MapConnection(west.Id, center.Id, TimeSpan.FromSeconds(5)),
+            new MapConnection(center.Id, east.Id, TimeSpan.FromSeconds(5)),
+            new MapConnection(center.Id, north.Id, TimeSpan.FromSeconds(8)),
+            new MapConnection(west.Id, north.Id, TimeSpan.FromSeconds(12))
+        ]);
         return new WorldState(map,
-            [Army(firstPlayer, west.Id), Army(firstPlayer, west.Id), Army(secondPlayer, east.Id),
-             Army(secondPlayer, east.Id), Army(ally, north.Id)], databaseTime,
-            [new PlayerAlliance(firstPlayer, ally)], randomSeed: 12345);
+            [
+                Army(firstPlayer, west.Id), Army(firstPlayer, west.Id), Army(secondPlayer, east.Id),
+                Army(secondPlayer, east.Id), Army(ally, north.Id)
+            ], databaseTime,
+            [new PlayerAlliance(firstPlayer, ally)], 12345);
     }
 
-    private static Army Army(Guid owner, Guid location) => new(Guid.NewGuid(), owner, location,
-        [new Unit(Guid.NewGuid(), 100m, 5m), new Unit(Guid.NewGuid(), 100m, 5m), new Unit(Guid.NewGuid(), 100m, 5m)]);
+    private static Army Army(Guid owner, Guid location)
+    {
+        return new Army(Guid.NewGuid(), owner, location,
+        [
+            new Unit(Guid.NewGuid(), 100m, 5m), new Unit(Guid.NewGuid(), 100m, 5m), new Unit(Guid.NewGuid(), 100m, 5m)
+        ]);
+    }
 }

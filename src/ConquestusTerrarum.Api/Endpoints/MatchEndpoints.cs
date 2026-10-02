@@ -21,20 +21,17 @@ public static class MatchEndpoints
             app.MapGroup("/api/v1")
                 .WithTags("Matches");
 
-        api.AddEndpointFilter(
-            async (context, next) =>
-            {
-                if (context.HttpContext.Request.Query.Count != 0)
-                {
-                    throw new InvalidApiRequestException(
-                        "Query parameters are not supported for this endpoint.");
-                }
+        api.AddEndpointFilter(async (context, next) =>
+        {
+            if (context.HttpContext.Request.Query.Count != 0)
+                throw new InvalidApiRequestException(
+                    "Query parameters are not supported for this endpoint.");
 
-                context.HttpContext.Response.Headers.CacheControl =
-                    "no-store";
+            context.HttpContext.Response.Headers.CacheControl =
+                "no-store";
 
-                return await next(context);
-            });
+            return await next(context);
+        });
 
         Describe(
             api.MapGet(
@@ -55,13 +52,11 @@ public static class MatchEndpoints
                 .WithName("RetreatArmy"));
 
         if (app.Environment.IsDevelopment())
-        {
             Describe(
                 api.MapPost(
                         "/dev/matches",
                         CreateDevelopmentMatch)
                     .WithName("CreateDevelopmentMatch"));
-        }
 
         // Change feed intentionally accepts:
         // ?after=<cursor>&limit=<page size>
@@ -73,6 +68,11 @@ public static class MatchEndpoints
                     GetUpdates)
                 .WithTags("Matches")
                 .WithName("GetMatchUpdates"));
+        Describe(
+            api.MapGet(
+                    "/matches/{matchId}/armies/{armyId}/details",
+                    GetArmyDetails)
+                .WithName("GetArmyDetails"));
     }
 
     private static void Describe(
@@ -121,16 +121,16 @@ public static class MatchEndpoints
             ReadLongQuery(
                 request,
                 "after",
-                defaultValue: 0,
-                minimum: 0);
+                0,
+                0);
 
         var limit =
             ReadIntQuery(
                 request,
                 "limit",
-                defaultValue: 100,
-                minimum: 1,
-                maximum: 500);
+                100,
+                1,
+                500);
 
         request.HttpContext.Response.Headers.CacheControl =
             "no-store";
@@ -152,6 +152,69 @@ public static class MatchEndpoints
                 page.NextCursor,
                 page.HasMore,
                 updates));
+    }
+
+    private static async Task<Ok<ArmyDetailsResponse>> GetArmyDetails(
+        Guid matchId,
+        Guid armyId,
+        IMatchRepository repository,
+        CancellationToken cancellationToken)
+    {
+        ValidateId(
+            matchId,
+            "matchId");
+
+        ValidateId(
+            armyId,
+            "armyId");
+
+        var result =
+            await repository.QueryCurrentAsync(
+                matchId,
+                (snapshot, databaseTime) =>
+                {
+                    var army =
+                        snapshot.Armies.Single(candidate =>
+                            candidate.Id == armyId);
+
+                    var isDestroyed =
+                        !army.Units.Any(unit =>
+                            unit.CurrentHitPoints > 0m);
+
+                    var canRetreat =
+                        !isDestroyed &&
+                        army.IsInBattle &&
+                        army.Movement is null &&
+                        army.RetreatLocationId is not null;
+
+                    return new ArmyDetailsResponse(
+                        databaseTime,
+                        army.Id,
+                        isDestroyed,
+                        army.IsInBattle,
+                        canRetreat,
+                        army.RetreatLocationId,
+                        army.Units
+                            .OrderBy(unit => unit.Id)
+                            .Select(unit =>
+                                new UnitResponse(
+                                    unit.Id,
+                                    unit.MaxHitPoints,
+                                    unit.CurrentHitPoints,
+                                    unit.DamagePerSecond,
+                                    unit.CurrentHitPoints > 0m,
+                                    unit.CurrentHitPoints > 0m &&
+                                    unit.CurrentHitPoints <
+                                    unit.MaxHitPoints))
+                            .ToArray());
+                },
+                cancellationToken);
+
+        return TypedResults.Ok(
+            result.Value with
+            {
+                ServerTime = result.DatabaseTime
+            });
     }
 
     private static MatchUpdateResponse MapUpdate(
@@ -257,7 +320,7 @@ public static class MatchEndpoints
                             matchId,
                             world,
                             databaseTime,
-                            version: 0));
+                            0));
                 },
                 cancellationToken);
 
@@ -297,7 +360,7 @@ public static class MatchEndpoints
                         matchId,
                         world,
                         databaseTime,
-                        version: 0);
+                        0);
 
                 return world;
             },
@@ -321,9 +384,7 @@ public static class MatchEndpoints
                     key,
                     "limit",
                     StringComparison.OrdinalIgnoreCase))
-            {
                 continue;
-            }
 
             throw new InvalidApiRequestException(
                 $"Unsupported query parameter '{key}'.");
@@ -339,9 +400,7 @@ public static class MatchEndpoints
         if (!request.Query.TryGetValue(
                 name,
                 out var values))
-        {
             return defaultValue;
-        }
 
         if (values.Count != 1 ||
             !long.TryParse(
@@ -350,10 +409,8 @@ public static class MatchEndpoints
                 CultureInfo.InvariantCulture,
                 out var value) ||
             value < minimum)
-        {
             throw new InvalidApiRequestException(
                 $"Query parameter '{name}' is invalid.");
-        }
 
         return value;
     }
@@ -368,9 +425,7 @@ public static class MatchEndpoints
         if (!request.Query.TryGetValue(
                 name,
                 out var values))
-        {
             return defaultValue;
-        }
 
         if (values.Count != 1 ||
             !int.TryParse(
@@ -380,10 +435,8 @@ public static class MatchEndpoints
                 out var value) ||
             value < minimum ||
             value > maximum)
-        {
             throw new InvalidApiRequestException(
                 $"Query parameter '{name}' is invalid.");
-        }
 
         return value;
     }
@@ -393,10 +446,8 @@ public static class MatchEndpoints
         string field)
     {
         if (id == Guid.Empty)
-        {
             throw new InvalidApiRequestException(
                 $"{field} cannot be empty.");
-        }
     }
 
     private static void RequireNoBody(
@@ -405,9 +456,7 @@ public static class MatchEndpoints
         if (request.HttpContext.Features
                 .Get<IHttpRequestBodyDetectionFeature>()
                 ?.CanHaveBody == true)
-        {
             throw new InvalidApiRequestException(
                 "This endpoint does not accept a request body.");
-        }
     }
 }

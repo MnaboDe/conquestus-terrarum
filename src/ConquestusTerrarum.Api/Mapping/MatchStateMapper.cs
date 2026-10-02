@@ -10,8 +10,9 @@ public static class MatchStateMapper
         WorldState world,
         DateTimeOffset serverTime,
         long version,
-        long updateCursor = 0) =>
-        new(
+        long updateCursor = 0)
+    {
+        return new MatchStateResponse(
             matchId,
             version,
             updateCursor,
@@ -41,4 +42,5 @@ public static class MatchStateMapper
                 b.Slots.OrderBy(s => s.Index).Select(s => new CombatSlotResponse(s.Index, s.FirstArmyId, s.FirstUnitId,
                     s.SecondArmyId, s.SecondUnitId, s.PairedAt, s.FirstDeathAt,
                     s.SecondDeathAt)).ToArray())).ToArray());
+    }
 }

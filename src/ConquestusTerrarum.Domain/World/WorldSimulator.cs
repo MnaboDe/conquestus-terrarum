@@ -14,9 +14,11 @@ public static class WorldSimulator
         {
             var boundary = targetTime;
             foreach (var army in world.Armies)
-                if (army.Movement is { } movement && movement.ArriveAt < boundary) boundary = movement.ArriveAt;
+                if (army.Movement is { } movement && movement.ArriveAt < boundary)
+                    boundary = movement.ArriveAt;
             foreach (var slot in world.Battles.SelectMany(battle => battle.Slots))
-                if (slot.NextDeathAt is { } death && death < boundary) boundary = death;
+                if (slot.NextDeathAt is { } death && death < boundary)
+                    boundary = death;
 
             // A: Advance continuous damage for ALL battles before any discrete event.
             foreach (var slot in world.Battles.SelectMany(battle => battle.Slots)) slot.AdvanceDamage(boundary);

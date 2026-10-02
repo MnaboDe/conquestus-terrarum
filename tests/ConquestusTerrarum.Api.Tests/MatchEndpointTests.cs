@@ -18,11 +18,21 @@ public class MatchEndpointTests
         Converters = { new JsonStringEnumConverter<MovementKindResponse>(JsonNamingPolicy.CamelCase) }
     };
 
-    private static WorldState Peaceful() => new(new GameMap([new(Id(2), "Next"), new(Id(1), "Home", Id(21), 2)],
-        [new(Id(1), Id(2), TimeSpan.FromTicks(300000001))]), [Army(11, 21, 1, Unit(101))], Start);
+    private static WorldState Peaceful()
+    {
+        return new WorldState(new GameMap([new Location(Id(2), "Next"), new Location(Id(1), "Home", Id(21), 2)],
+            [new MapConnection(Id(1), Id(2), TimeSpan.FromTicks(300000001))]), [Army(11, 21, 1, Unit(101))], Start);
+    }
 
-    private static RecordingMatchRepository Repository() => new(Peaceful(), Start.AddSeconds(2));
-    private static string Path(RecordingMatchRepository repository) => $"/api/v1/matches/{repository.MatchId}";
+    private static RecordingMatchRepository Repository()
+    {
+        return new RecordingMatchRepository(Peaceful(), Start.AddSeconds(2));
+    }
+
+    private static string Path(RecordingMatchRepository repository)
+    {
+        return $"/api/v1/matches/{repository.MatchId}";
+    }
 
     private static async Task<MatchStateResponse> State(HttpResponseMessage response)
     {
@@ -355,6 +365,7 @@ public class MatchEndpointTests
         Assert.DoesNotContain("randomSeed", json);
         Assert.DoesNotContain("WorldSnapshot", json);
         Assert.Equal(HttpStatusCode.NotFound, (await client.GetAsync("/weatherforecast")).StatusCode);
+        Assert.True(paths.TryGetProperty("/api/v1/matches/{matchId}/armies/{armyId}/details", out _));
     }
 
     [Fact]
@@ -481,6 +492,56 @@ public class MatchEndpointTests
         Assert.Equal(
             0,
             repository.UpdateReads);
+    }
+
+    [Fact]
+    public async Task ArmyDetailsReturnsCurrentCombatHp()
+    {
+        var repository =
+            new RecordingMatchRepository(
+                Combat(),
+                Start.AddSeconds(0.75));
+
+        await using var factory =
+            new ApiFactory(repository);
+
+        using var client =
+            factory.CreateClient();
+
+        var response =
+            await client.GetAsync(
+                $"{Path(repository)}/armies/{Id(11)}/details");
+
+        response.EnsureSuccessStatusCode();
+
+        var details =
+            await response.Content
+                .ReadFromJsonAsync<ArmyDetailsResponse>(
+                    JsonOptions);
+
+        Assert.NotNull(details);
+
+        Assert.Equal(
+            Id(11),
+            details.ArmyId);
+
+        Assert.Equal(
+            repository.DatabaseTime,
+            details.ServerTime);
+
+        Assert.True(
+            details.IsInBattle);
+
+        Assert.NotEmpty(
+            details.Units);
+
+        Assert.Equal(
+            1,
+            repository.Queries);
+
+        Assert.Equal(
+            0,
+            repository.Executions);
     }
 
     internal static async Task<JsonElement> AssertProblem(HttpResponseMessage response, int status)

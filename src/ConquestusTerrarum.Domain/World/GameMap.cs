@@ -2,11 +2,8 @@
 
 public sealed class GameMap
 {
-    private readonly Dictionary<Guid, Location> _locations;
     private readonly List<MapConnection> _connections;
-
-    public IReadOnlyCollection<Location> Locations => _locations.Values;
-    public IReadOnlyCollection<MapConnection> Connections => _connections;
+    private readonly Dictionary<Guid, Location> _locations;
 
     public GameMap(
         IEnumerable<Location> locations,
@@ -21,13 +18,14 @@ public sealed class GameMap
         ValidateConnections();
     }
 
+    public IReadOnlyCollection<Location> Locations => _locations.Values;
+    public IReadOnlyCollection<MapConnection> Connections => _connections;
+
     public Location GetLocation(Guid locationId)
     {
         if (!_locations.TryGetValue(locationId, out var location))
-        {
             throw new InvalidOperationException(
                 $"Location '{locationId}' does not exist.");
-        }
 
         return location;
     }
@@ -36,16 +34,13 @@ public sealed class GameMap
         Guid firstLocationId,
         Guid secondLocationId)
     {
-        var connection = _connections.FirstOrDefault(
-            connection => connection.Connects(
-                firstLocationId,
-                secondLocationId));
+        var connection = _connections.FirstOrDefault(connection => connection.Connects(
+            firstLocationId,
+            secondLocationId));
 
         if (connection is null)
-        {
             throw new InvalidOperationException(
                 $"Locations '{firstLocationId}' and '{secondLocationId}' are not connected.");
-        }
 
         return connection;
     }
@@ -55,16 +50,12 @@ public sealed class GameMap
         foreach (var connection in _connections)
         {
             if (!_locations.ContainsKey(connection.FromLocationId))
-            {
                 throw new ArgumentException(
                     $"Connection references unknown location '{connection.FromLocationId}'.");
-            }
 
             if (!_locations.ContainsKey(connection.ToLocationId))
-            {
                 throw new ArgumentException(
                     $"Connection references unknown location '{connection.ToLocationId}'.");
-            }
         }
     }
 }

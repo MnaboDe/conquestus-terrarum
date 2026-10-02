@@ -5,10 +5,6 @@ namespace ConquestusTerrarum.Domain.World;
 public sealed partial class Battle
 {
     private readonly List<CombatSlot> _slots = new();
-    public Guid LocationId { get; }
-    public DateTimeOffset StartedAt { get; }
-    public ulong RandomState { get; private set; }
-    public IReadOnlyList<CombatSlot> Slots { get; }
 
     internal Battle(Guid locationId, DateTimeOffset startedAt, ulong worldSeed)
     {
@@ -19,9 +15,14 @@ public sealed partial class Battle
         // Explicit byte order and UTC ticks; no runtime hashing or process randomness.
         var bytes = locationId.ToByteArray();
         RandomState = worldSeed ^ BinaryPrimitives.ReadUInt64LittleEndian(bytes) ^
-            BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(8)) ^ (ulong)startedAt.UtcTicks;
+                      BinaryPrimitives.ReadUInt64LittleEndian(bytes.AsSpan(8)) ^ (ulong)startedAt.UtcTicks;
         NextRandom();
     }
+
+    public Guid LocationId { get; }
+    public DateTimeOffset StartedAt { get; }
+    public ulong RandomState { get; private set; }
+    public IReadOnlyList<CombatSlot> Slots { get; }
 
     // SplitMix64: the incrementing state is all that is needed to resume the random stream.
     private ulong NextRandom()
@@ -42,15 +43,19 @@ public sealed partial class Battle
         var bound = (ulong)count;
         var threshold = unchecked(0UL - bound) % bound;
         ulong value;
-        do { value = NextRandom(); } while (value < threshold);
+        do
+        {
+            value = NextRandom();
+        } while (value < threshold);
+
         return (int)(value % bound);
     }
 
     internal void RemoveInvalidSlots(WorldState world)
     {
         _slots.RemoveAll(slot => !slot.FirstUnit.IsAlive || !slot.SecondUnit.IsAlive ||
-            world.GetArmy(slot.FirstArmyId).LocationId != LocationId ||
-            world.GetArmy(slot.SecondArmyId).LocationId != LocationId);
+                                 world.GetArmy(slot.FirstArmyId).LocationId != LocationId ||
+                                 world.GetArmy(slot.SecondArmyId).LocationId != LocationId);
     }
 
     internal void Refill(WorldState world, DateTimeOffset time)
@@ -67,8 +72,9 @@ public sealed partial class Battle
             if (_slots.Any(slot => slot.Index == index)) continue;
             var pairs = new List<(int First, int Second)>();
             for (var a = 0; a < idle.Count; a++)
-                for (var b = a + 1; b < idle.Count; b++)
-                    if (world.AreHostile(idle[a].Army.OwnerId, idle[b].Army.OwnerId)) pairs.Add((a, b));
+            for (var b = a + 1; b < idle.Count; b++)
+                if (world.AreHostile(idle[a].Army.OwnerId, idle[b].Army.OwnerId))
+                    pairs.Add((a, b));
             if (pairs.Count == 0) break;
             var pair = pairs[Choose(pairs.Count)];
             var first = idle[pair.First];
@@ -77,6 +83,7 @@ public sealed partial class Battle
             idle.RemoveAt(pair.Second);
             idle.RemoveAt(pair.First);
         }
+
         _slots.Sort((a, b) => a.Index.CompareTo(b.Index));
     }
 }

@@ -10,4 +10,5 @@ public sealed class InvalidWorldStateException(string message, Exception? innerE
     : Exception(message, innerException);
 
 public sealed class DatabaseTimeBehindWorldException(DateTimeOffset databaseTime, DateTimeOffset checkpoint)
-    : Exception($"Database time '{databaseTime:O}' precedes world checkpoint '{checkpoint:O}'. The operation was not applied.");
+    : Exception(
+        $"Database time '{databaseTime:O}' precedes world checkpoint '{checkpoint:O}'. The operation was not applied.");

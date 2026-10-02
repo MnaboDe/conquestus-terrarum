@@ -4,20 +4,15 @@ namespace ConquestusTerrarum.Domain.World;
 
 public sealed partial class Army
 {
-    internal bool RetreatLocked => _retreatLocked;
-
-    internal ArmySnapshot CreateSnapshot() => new(Id, OwnerId, LocationId, EnteredLocationAt,
-        PreviousLocationId, RetreatLocationId, _retreatLocked, IsInBattle,
-        Movement is { } m ? new(m.FromLocationId, m.ToLocationId, m.StartedAt, m.ArriveAt, m.Kind) : null,
-        Units.OrderBy(u => u.Id).Select(u => new UnitSnapshot(u.Id, u.MaxHitPoints, u.CurrentHitPoints, u.DamagePerSecond)).ToImmutableArray());
-
     internal Army(ArmySnapshot snapshot)
     {
-        if (snapshot.Id == Guid.Empty || snapshot.OwnerId == Guid.Empty || snapshot.Units.IsDefault || snapshot.Units.Any(u => u is null))
+        if (snapshot.Id == Guid.Empty || snapshot.OwnerId == Guid.Empty || snapshot.Units.IsDefault ||
+            snapshot.Units.Any(u => u is null))
             throw new ArgumentException("Invalid army identity or units.");
         Id = snapshot.Id;
         OwnerId = snapshot.OwnerId;
-        Units = snapshot.Units.Select(u => new Unit(u.Id, u.MaxHitPoints, u.DamagePerSecond, u.CurrentHitPoints)).ToList().AsReadOnly();
+        Units = snapshot.Units.Select(u => new Unit(u.Id, u.MaxHitPoints, u.DamagePerSecond, u.CurrentHitPoints))
+            .ToList().AsReadOnly();
         LocationId = snapshot.LocationId;
         EnteredLocationAt = snapshot.EnteredLocationAt;
         PreviousLocationId = snapshot.PreviousLocationId;
@@ -31,13 +26,24 @@ public sealed partial class Army
             Movement = MovementOrder.Restore(m);
         }
     }
+
+    internal bool RetreatLocked => _retreatLocked;
+
+    internal ArmySnapshot CreateSnapshot()
+    {
+        return new ArmySnapshot(Id, OwnerId, LocationId, EnteredLocationAt,
+            PreviousLocationId, RetreatLocationId, _retreatLocked, IsInBattle,
+            Movement is { } m
+                ? new MovementSnapshot(m.FromLocationId, m.ToLocationId, m.StartedAt, m.ArriveAt, m.Kind)
+                : null,
+            Units.OrderBy(u => u.Id)
+                .Select(u => new UnitSnapshot(u.Id, u.MaxHitPoints, u.CurrentHitPoints, u.DamagePerSecond))
+                .ToImmutableArray());
+    }
 }
 
 public sealed partial class Battle
 {
-    internal BattleSnapshot CreateSnapshot() => new(LocationId, StartedAt, RandomState,
-        Slots.OrderBy(s => s.Index).Select(s => s.CreateSnapshot()).ToImmutableArray());
-
     internal Battle(BattleSnapshot snapshot, WorldState world)
     {
         LocationId = snapshot.LocationId;
@@ -47,13 +53,16 @@ public sealed partial class Battle
         foreach (var slot in snapshot.Slots.OrderBy(s => s.Index)) _slots.Add(new CombatSlot(slot, world));
         Slots = _slots.AsReadOnly();
     }
+
+    internal BattleSnapshot CreateSnapshot()
+    {
+        return new BattleSnapshot(LocationId, StartedAt, RandomState,
+            Slots.OrderBy(s => s.Index).Select(s => s.CreateSnapshot()).ToImmutableArray());
+    }
 }
 
 public sealed partial class CombatSlot
 {
-    internal CombatSlotSnapshot CreateSnapshot() => new(Index, FirstArmyId, FirstUnitId, SecondArmyId,
-        SecondUnitId, PairedAt, FirstStartingHitPoints, SecondStartingHitPoints, FirstDeathAt, SecondDeathAt);
-
     internal CombatSlot(CombatSlotSnapshot s, WorldState world)
     {
         Index = s.Index;
@@ -74,8 +83,16 @@ public sealed partial class CombatSlot
         if (PairedAt > world.CheckpointTime || NextDeathAt <= world.CheckpointTime)
             throw new ArgumentException("Combat slot has an invalid time boundary.");
         var ticks = (world.CheckpointTime - PairedAt).Ticks;
-        if (FirstUnit.CurrentHitPoints != RemainingHitPoints(FirstStartingHitPoints, SecondUnit.DamagePerSecond, ticks) ||
-            SecondUnit.CurrentHitPoints != RemainingHitPoints(SecondStartingHitPoints, FirstUnit.DamagePerSecond, ticks))
+        if (FirstUnit.CurrentHitPoints !=
+            RemainingHitPoints(FirstStartingHitPoints, SecondUnit.DamagePerSecond, ticks) ||
+            SecondUnit.CurrentHitPoints !=
+            RemainingHitPoints(SecondStartingHitPoints, FirstUnit.DamagePerSecond, ticks))
             throw new ArgumentException("Unit HP does not match combat anchors at the checkpoint.");
+    }
+
+    internal CombatSlotSnapshot CreateSnapshot()
+    {
+        return new CombatSlotSnapshot(Index, FirstArmyId, FirstUnitId, SecondArmyId,
+            SecondUnitId, PairedAt, FirstStartingHitPoints, SecondStartingHitPoints, FirstDeathAt, SecondDeathAt);
     }
 }

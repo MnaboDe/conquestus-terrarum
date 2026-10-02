@@ -11,10 +11,11 @@ builder.Services.AddOpenApi();
 builder.Services.AddProblemDetails();
 builder.Services.Configure<RouteHandlerOptions>(options => options.ThrowOnBadRequest = true);
 builder.Services.ConfigureHttpJsonOptions(options =>
-    options.SerializerOptions.Converters.Add(new JsonStringEnumConverter<MovementKindResponse>(JsonNamingPolicy.CamelCase)));
+    options.SerializerOptions.Converters.Add(
+        new JsonStringEnumConverter<MovementKindResponse>(JsonNamingPolicy.CamelCase)));
 builder.Services.AddSingleton(sp => NpgsqlDataSource.Create(
     sp.GetRequiredService<IConfiguration>().GetConnectionString("Postgres")
-        ?? throw new InvalidOperationException("ConnectionStrings:Postgres must be configured.")));
+    ?? throw new InvalidOperationException("ConnectionStrings:Postgres must be configured.")));
 builder.Services.AddSingleton<IMatchRepository, PostgresMatchRepository>();
 
 var app = builder.Build();

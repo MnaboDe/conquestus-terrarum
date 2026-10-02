@@ -1,7 +1,7 @@
+using System.Text.Json;
 using ConquestusTerrarum.Domain.World;
 using Npgsql;
 using static ConquestusTerrarum.Testing.SnapshotWorlds;
-using System.Text.Json;
 
 namespace ConquestusTerrarum.Persistence.Tests;
 
@@ -50,9 +50,12 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
     private readonly WorldSnapshotSerializer _serializer = new();
     private PostgresMatchRepository Repository => new(database.DataSource);
 
-    private static WorldState EmptyWorld() => new(new GameMap([new(Id(1), "Home"), new(Id(2), "Next")],
-            [new(Id(1), Id(2), TimeSpan.FromSeconds(30))]), [Army(11, 21, 1, Unit(101))],
-        new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    private static WorldState EmptyWorld()
+    {
+        return new WorldState(new GameMap([new Location(Id(1), "Home"), new Location(Id(2), "Next")],
+                [new MapConnection(Id(1), Id(2), TimeSpan.FromSeconds(30))]), [Army(11, 21, 1, Unit(101))],
+            new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
+    }
 
     private async Task<(string Json, long Version, DateTimeOffset Created, DateTimeOffset Updated)> Row(Guid id)
     {
@@ -196,9 +199,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
 
             if ((bool)(await command.ExecuteScalarAsync(
                     cancellationToken))!)
-            {
                 return;
-            }
 
             await Task.Delay(
                 10,
@@ -319,7 +320,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var connection = new MapConnection(Id(1), Id(2), TimeSpan.FromTicks(17));
         var army = Army(11, 21, 1, Unit(101, decimal.MaxValue, 0.0000000000000000000000000001m));
         army.StartMovement(connection, start);
-        var world = new WorldState(new GameMap([new(Id(1), "One"), new(Id(2), "Two")], [connection]), [army], start,
+        var world = new WorldState(new GameMap([new Location(Id(1), "One"), new Location(Id(2), "Two")], [connection]),
+            [army], start,
             randomSeed: ulong.MaxValue);
         await Repository.CreateAsync(id, world);
         var saved = _serializer.Deserialize((await Row(id)).Json);
@@ -342,7 +344,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         {
             captured = databaseTime;
             calls++;
-            var world = new WorldState(new GameMap([new(Id(1), "Battlefield")], []),
+            var world = new WorldState(new GameMap([new Location(Id(1), "Battlefield")], []),
                 [Army(11, 21, 1, Unit(101)), Army(12, 22, 1, Unit(102))], databaseTime);
             initial = world.CreateSnapshot();
             return world;
@@ -380,7 +382,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         {
             var id = Guid.NewGuid();
             await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.CreateAsync(id, time =>
-                new WorldState(new GameMap([new(Id(1), "Home")], []), [], time.AddTicks(offset))));
+                new WorldState(new GameMap([new Location(Id(1), "Home")], []), [], time.AddTicks(offset))));
             await Assert.ThrowsAsync<MatchNotFoundException>(() => Repository.LoadCurrentAsync(id));
         }
     }
@@ -455,7 +457,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var all =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 0);
+                0);
 
         Assert.False(all.HasMore);
         Assert.Equal(3, all.NextCursor);
@@ -478,7 +480,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var afterFirst =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 1);
+                1);
 
         Assert.False(afterFirst.HasMore);
         Assert.Equal(3, afterFirst.NextCursor);
@@ -491,7 +493,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var noChanges =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 3);
+                3);
 
         Assert.False(noChanges.HasMore);
         Assert.Equal(3, noChanges.NextCursor);
@@ -500,8 +502,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var firstPage =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 0,
-                limit: 1);
+                0,
+                1);
 
         Assert.True(firstPage.HasMore);
         Assert.Equal(1, firstPage.NextCursor);
@@ -513,8 +515,8 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var secondPage =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: firstPage.NextCursor,
-                limit: 1);
+                firstPage.NextCursor,
+                1);
 
         Assert.True(secondPage.HasMore);
         Assert.Equal(2, secondPage.NextCursor);
@@ -538,7 +540,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var empty =
             await Repository.ReadUpdatesAsync(
                 existingId,
-                after: 0);
+                0);
 
         Assert.Empty(empty.Updates);
         Assert.Equal(0, empty.NextCursor);
@@ -547,7 +549,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         await Assert.ThrowsAsync<MatchNotFoundException>(() =>
             Repository.ReadUpdatesAsync(
                 Guid.NewGuid(),
-                after: 0));
+                0));
     }
 
     [PostgresFact]
@@ -576,7 +578,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var page =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 0);
+                0);
 
         Assert.False(page.HasMore);
         Assert.Equal(1, page.NextCursor);
@@ -662,10 +664,10 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
                 return new WorldState(
                     new GameMap(
                         [
-                            new(
+                            new Location(
                                 Id(1),
                                 "Origin"),
-                            new(
+                            new Location(
                                 Id(2),
                                 "Battlefield")
                         ],
@@ -709,7 +711,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         var page =
             await Repository.ReadUpdatesAsync(
                 id,
-                after: 0);
+                0);
 
         Assert.False(page.HasMore);
         Assert.Equal(2, page.NextCursor);
@@ -756,5 +758,81 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
             battlePayload.RootElement
                 .GetProperty("locationId")
                 .GetGuid());
+    }
+    
+    [PostgresFact]
+    [Trait("Category", "Postgres")]
+    public async Task QueryCurrentDoesNotPersistContinuousCombatDamage()
+    {
+        var id =
+            Guid.NewGuid();
+
+        await Repository.CreateAsync(
+            id,
+            databaseTime =>
+                new WorldState(
+                    new GameMap(
+                        [
+                            new(
+                                Id(1),
+                                "Battlefield")
+                        ],
+                        []),
+                    [
+                        Army(
+                            11,
+                            21,
+                            1,
+                            Unit(
+                                101,
+                                hp: 100,
+                                dps: 10)),
+                        Army(
+                            12,
+                            22,
+                            1,
+                            Unit(
+                                102,
+                                hp: 100,
+                                dps: 10))
+                    ],
+                    databaseTime,
+                    randomSeed: 123));
+
+        var before =
+            await Row(id);
+
+        await using (var delay =
+                     database.DataSource.CreateCommand(
+                         "SELECT pg_sleep(0.05)"))
+        {
+            await delay.ExecuteNonQueryAsync();
+        }
+
+        var result =
+            await Repository.QueryCurrentAsync(
+                id,
+                (snapshot, _) =>
+                    snapshot.Armies
+                        .Single(
+                            army =>
+                                army.Id == Id(11))
+                        .Units
+                        .Single()
+                        .CurrentHitPoints);
+
+        Assert.True(
+            result.Value < 100m);
+
+        // Live query saw current HP...
+        Assert.Equal(
+            0,
+            result.Version);
+
+        // ...but continuous damage alone did not rewrite
+        // the authoritative PostgreSQL snapshot.
+        Assert.Equal(
+            before,
+            await Row(id));
     }
 }

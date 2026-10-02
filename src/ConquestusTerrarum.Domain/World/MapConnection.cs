@@ -1,12 +1,9 @@
 ﻿// MapConnection.cs
+
 namespace ConquestusTerrarum.Domain.World;
 
 public sealed class MapConnection
 {
-    public Guid FromLocationId { get; }
-    public Guid ToLocationId { get; }
-    public TimeSpan TravelTime { get; }
-
     public MapConnection(
         Guid fromLocationId,
         Guid toLocationId,
@@ -31,10 +28,14 @@ public sealed class MapConnection
         TravelTime = travelTime;
     }
 
+    public Guid FromLocationId { get; }
+    public Guid ToLocationId { get; }
+    public TimeSpan TravelTime { get; }
+
     public bool Connects(Guid first, Guid second)
     {
         return
-            FromLocationId == first && ToLocationId == second ||
-            FromLocationId == second && ToLocationId == first;
+            (FromLocationId == first && ToLocationId == second) ||
+            (FromLocationId == second && ToLocationId == first);
     }
 }

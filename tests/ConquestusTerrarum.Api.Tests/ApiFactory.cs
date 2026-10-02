@@ -8,7 +8,8 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 namespace ConquestusTerrarum.Api.Tests;
 
-internal sealed class ApiFactory(RecordingMatchRepository repository, string environment = "Development") : WebApplicationFactory<Program>
+internal sealed class ApiFactory(RecordingMatchRepository repository, string environment = "Development")
+    : WebApplicationFactory<Program>
 {
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
@@ -33,12 +34,15 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
     public Exception? Failure { get; set; }
     public Func<CancellationToken, Task>? BeforeExecution { get; set; }
     public CancellationToken LastCancellationToken { get; private set; }
-    
+
     public List<MatchUpdateEntry> Updates { get; } = [];
 
     public int UpdateReads { get; private set; }
+    
+    public int Queries { get; private set; }
 
-    public Task CreateAsync(Guid matchId, Func<DateTimeOffset, WorldState> worldFactory, CancellationToken cancellationToken = default)
+    public Task CreateAsync(Guid matchId, Func<DateTimeOffset, WorldState> worldFactory,
+        CancellationToken cancellationToken = default)
     {
         cancellationToken.ThrowIfCancellationRequested();
         LastCancellationToken = cancellationToken;
@@ -52,13 +56,15 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         return Task.CompletedTask;
     }
 
-    public Task<MatchExecutionResult<WorldSnapshot>> LoadCurrentAsync(Guid matchId, CancellationToken cancellationToken = default)
+    public Task<MatchExecutionResult<WorldSnapshot>> LoadCurrentAsync(Guid matchId,
+        CancellationToken cancellationToken = default)
     {
         Loads++;
         return ExecuteAsync(matchId, (current, _) => Task.FromResult(current.CreateSnapshot()), cancellationToken);
     }
 
-    public async Task<MatchExecutionResult<T>> ExecuteAsync<T>(Guid matchId, Func<WorldState, DateTimeOffset, Task<T>> operation,
+    public async Task<MatchExecutionResult<T>> ExecuteAsync<T>(Guid matchId,
+        Func<WorldState, DateTimeOffset, Task<T>> operation,
         CancellationToken cancellationToken = default)
     {
         LastCancellationToken = cancellationToken;
@@ -72,9 +78,49 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         var value = await operation(working, DatabaseTime);
         cancellationToken.ThrowIfCancellationRequested();
         Stored = working.CreateSnapshot();
-        return new(value, ++Version, DatabaseTime);
+        return new MatchExecutionResult<T>(value, ++Version, DatabaseTime);
     }
     
+    public Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(
+        Guid matchId,
+        Func<WorldSnapshot, DateTimeOffset, T> query,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+
+        LastCancellationToken =
+            cancellationToken;
+
+        Queries++;
+
+        if (Failure is { } error)
+            throw error;
+
+        if (matchId != MatchId)
+            throw new MatchNotFoundException(matchId);
+
+        var working =
+            WorldState.Restore(Stored);
+
+        WorldSimulator.AdvanceTo(
+            working,
+            DatabaseTime);
+
+        var snapshot =
+            working.CreateSnapshot();
+
+        var value =
+            query(
+                snapshot,
+                DatabaseTime);
+
+        return Task.FromResult(
+            new MatchExecutionResult<T>(
+                value,
+                Version,
+                DatabaseTime));
+    }
+
     public Task<MatchUpdatesPage> ReadUpdatesAsync(
         Guid matchId,
         long after,
@@ -96,12 +142,10 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
 
         var matching =
             Updates
-                .Where(
-                    update =>
-                        update.Sequence > after)
-                .OrderBy(
-                    update =>
-                        update.Sequence)
+                .Where(update =>
+                    update.Sequence > after)
+                .OrderBy(update =>
+                    update.Sequence)
                 .Take(limit + 1)
                 .ToList();
 
@@ -109,10 +153,8 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
             matching.Count > limit;
 
         if (hasMore)
-        {
             matching.RemoveAt(
                 matching.Count - 1);
-        }
 
         var nextCursor =
             matching.Count == 0

@@ -2,9 +2,39 @@
 
 public sealed partial class WorldState
 {
+    private readonly List<PlayerAlliance> _alliances;
     private readonly Dictionary<Guid, Army> _armies;
     private readonly Dictionary<Guid, Battle> _battles = new();
-    private readonly List<PlayerAlliance> _alliances;
+
+    public WorldState(
+        GameMap map,
+        IEnumerable<Army> armies,
+        DateTimeOffset checkpointTime,
+        IEnumerable<PlayerAlliance>? alliances = null,
+        ulong randomSeed = 0)
+    {
+        ArgumentNullException.ThrowIfNull(map);
+        ArgumentNullException.ThrowIfNull(armies);
+
+        RandomSeed = randomSeed;
+        Map = map;
+        CheckpointTime = checkpointTime;
+
+        _armies = armies.ToDictionary(army => army.Id);
+
+        _alliances = alliances?.ToList()
+                     ?? new List<PlayerAlliance>();
+
+        if (_armies.Values.SelectMany(army => army.Units).Select(unit => unit.Id).Distinct().Count() !=
+            _armies.Values.Sum(army => army.Units.Count))
+            throw new ArgumentException("Unit ids must be unique across the world.", nameof(armies));
+        ValidateArmyLocations();
+        InitializeArmyEntryTimes();
+
+        ReconcileAllBattles(
+            checkpointTime);
+        RefillBattles(checkpointTime);
+    }
 
     public ulong RandomSeed { get; }
 
@@ -21,46 +51,13 @@ public sealed partial class WorldState
     public IReadOnlyCollection<PlayerAlliance> Alliances =>
         _alliances;
 
-    public WorldState(
-        GameMap map,
-        IEnumerable<Army> armies,
-        DateTimeOffset checkpointTime,
-        IEnumerable<PlayerAlliance>? alliances = null,
-        ulong randomSeed = 0)
-    {
-        ArgumentNullException.ThrowIfNull(map);
-        ArgumentNullException.ThrowIfNull(armies);
-
-        RandomSeed = randomSeed;
-        Map = map;
-        CheckpointTime = checkpointTime;
-
-        _armies = armies.ToDictionary(
-            army => army.Id);
-
-        _alliances = alliances?.ToList()
-            ?? new List<PlayerAlliance>();
-
-        if (_armies.Values.SelectMany(army => army.Units).Select(unit => unit.Id).Distinct().Count() !=
-            _armies.Values.Sum(army => army.Units.Count))
-            throw new ArgumentException("Unit ids must be unique across the world.", nameof(armies));
-        ValidateArmyLocations();
-        InitializeArmyEntryTimes();
-
-        ReconcileAllBattles(
-            checkpointTime);
-        RefillBattles(checkpointTime);
-    }
-
     public Army GetArmy(Guid armyId)
     {
         if (!_armies.TryGetValue(
                 armyId,
                 out var army))
-        {
             throw new InvalidOperationException(
                 $"Army '{armyId}' does not exist.");
-        }
 
         return army;
     }
@@ -82,10 +79,9 @@ public sealed partial class WorldState
         if (firstPlayerId == secondPlayerId)
             return true;
 
-        return _alliances.Any(
-            alliance => alliance.Connects(
-                firstPlayerId,
-                secondPlayerId));
+        return _alliances.Any(alliance => alliance.Connects(
+            firstPlayerId,
+            secondPlayerId));
     }
 
     public bool AreHostile(
@@ -103,10 +99,8 @@ public sealed partial class WorldState
         DateTimeOffset commandTime)
     {
         if (commandTime < CheckpointTime)
-        {
             throw new InvalidOperationException(
                 "Command time cannot be before the world checkpoint.");
-        }
 
         WorldSimulator.AdvanceTo(
             this,
@@ -115,19 +109,15 @@ public sealed partial class WorldState
         var army = GetArmy(armyId);
 
         if (army.LocationId is null)
-        {
             throw new InvalidOperationException(
                 "Army is not currently located anywhere.");
-        }
 
         var originLocationId =
             army.LocationId.Value;
 
         if (army.IsInBattle)
-        {
             throw new InvalidOperationException(
                 "Army cannot start normal movement while in battle.");
-        }
 
         Map.GetLocation(
             destinationId);
@@ -170,53 +160,40 @@ public sealed partial class WorldState
         if (hasHostilePair)
         {
             if (!hadBattle)
-            {
                 _battles[locationId] =
                     new Battle(
                         locationId,
                         logicalTime,
                         RandomSeed);
-            }
 
             foreach (var army in armiesAtLocation)
-            {
                 if (HasHostileArmy(
                         army,
                         armiesAtLocation))
-                {
                     army.EnterBattle();
-                }
                 else
-                {
                     army.LeaveBattle();
-                }
-            }
 
             return;
         }
 
         if (!hadBattle)
         {
-            foreach (var army in armiesAtLocation)
-            {
-                army.LeaveBattle();
-            }
+            foreach (var army in armiesAtLocation) army.LeaveBattle();
 
             return;
         }
 
         _battles.Remove(locationId);
 
-        foreach (var army in armiesAtLocation)
-        {
-            army.LeaveBattle();
-        }
+        foreach (var army in armiesAtLocation) army.LeaveBattle();
 
-        if (resolveOwnership) ResolveOwnerAfterBattle(
-            location,
-            armiesAtLocation);
+        if (resolveOwnership)
+            ResolveOwnerAfterBattle(
+                location,
+                armiesAtLocation);
     }
-    
+
     private static void ResolveOwnerAfterBattle(
         Location location,
         IReadOnlyCollection<Army> survivingArmies)
@@ -227,10 +204,7 @@ public sealed partial class WorldState
                     army.EnteredLocationAt is not null)
                 .ToArray();
 
-        if (armiesWithEntryTime.Length == 0)
-        {
-            return;
-        }
+        if (armiesWithEntryTime.Length == 0) return;
 
         var earliestEntryTime =
             armiesWithEntryTime
@@ -259,16 +233,14 @@ public sealed partial class WorldState
         // поэтому не отдаём клетку случайно одному из них.
         location.ChangeOwner(null);
     }
-    
+
     public void Retreat(
         Guid armyId,
         DateTimeOffset commandTime)
     {
         if (commandTime < CheckpointTime)
-        {
             throw new InvalidOperationException(
                 "Command time cannot be before the world checkpoint.");
-        }
 
         WorldSimulator.AdvanceTo(
             this,
@@ -278,17 +250,13 @@ public sealed partial class WorldState
             GetArmy(armyId);
 
         if (!army.CanRetreat)
-        {
             throw new InvalidOperationException(
                 "Army cannot retreat from the current battle.");
-        }
 
         if (army.LocationId is null ||
             army.RetreatLocationId is null)
-        {
             throw new InvalidOperationException(
                 "Army has no retreat destination.");
-        }
 
         var battleLocationId =
             army.LocationId.Value;
@@ -303,9 +271,10 @@ public sealed partial class WorldState
 
         foreach (var unit in army.Units.Where(unit => unit.IsWounded)) unit.Kill();
         army.RemoveIfDestroyed();
-        if (!army.IsDestroyed) army.StartRetreat(
-            connection,
-            commandTime);
+        if (!army.IsDestroyed)
+            army.StartRetreat(
+                connection,
+                commandTime);
 
         ReconcileBattleAt(
             battleLocationId,
@@ -321,14 +290,15 @@ public sealed partial class WorldState
     internal Guid[] ReconcileWorld(DateTimeOffset time)
     {
         var previous = _battles.Keys.ToArray();
-        ReconcileAllBattles(time, resolveOwnership: false);
+        ReconcileAllBattles(time, false);
         return previous.Where(id => !_battles.ContainsKey(id)).ToArray();
     }
 
     internal void ResolvePostBattleOwnership(IEnumerable<Guid> endedLocations)
     {
         foreach (var id in endedLocations)
-            ResolveOwnerAfterBattle(Map.GetLocation(id), _armies.Values.Where(army => !army.IsDestroyed && army.LocationId == id).ToArray());
+            ResolveOwnerAfterBattle(Map.GetLocation(id),
+                _armies.Values.Where(army => !army.IsDestroyed && army.LocationId == id).ToArray());
     }
 
     private bool HasHostilePair(
@@ -337,24 +307,20 @@ public sealed partial class WorldState
         for (var firstIndex = 0;
              firstIndex < armies.Count;
              firstIndex++)
+        for (var secondIndex = firstIndex + 1;
+             secondIndex < armies.Count;
+             secondIndex++)
         {
-            for (var secondIndex = firstIndex + 1;
-                 secondIndex < armies.Count;
-                 secondIndex++)
-            {
-                var firstArmy =
-                    armies[firstIndex];
+            var firstArmy =
+                armies[firstIndex];
 
-                var secondArmy =
-                    armies[secondIndex];
+            var secondArmy =
+                armies[secondIndex];
 
-                if (AreHostile(
-                        firstArmy.OwnerId,
-                        secondArmy.OwnerId))
-                {
-                    return true;
-                }
-            }
+            if (AreHostile(
+                    firstArmy.OwnerId,
+                    secondArmy.OwnerId))
+                return true;
         }
 
         return false;
@@ -365,12 +331,10 @@ public sealed partial class WorldState
         bool resolveOwnership = true)
     {
         foreach (var location in Map.Locations)
-        {
             ReconcileBattleAt(
                 location.Id,
                 logicalTime,
                 resolveOwnership);
-        }
     }
 
     private void ValidateArmyLocations()
@@ -378,10 +342,8 @@ public sealed partial class WorldState
         foreach (var army in _armies.Values)
         {
             if (army.LocationId is { } locationId)
-            {
                 Map.GetLocation(
                     locationId);
-            }
 
             if (army.Movement is { } movement)
             {
@@ -393,25 +355,22 @@ public sealed partial class WorldState
             }
         }
     }
-    
+
     private void InitializeArmyEntryTimes()
     {
         foreach (var army in _armies.Values)
-        {
             army.InitializeLocationEntryTime(
                 CheckpointTime);
-        }
     }
-    
+
     private bool HasHostileArmy(
         Army army,
         IReadOnlyCollection<Army> armiesAtLocation)
     {
-        return armiesAtLocation.Any(
-            otherArmy =>
-                otherArmy.Id != army.Id &&
-                AreHostile(
-                    army.OwnerId,
-                    otherArmy.OwnerId));
+        return armiesAtLocation.Any(otherArmy =>
+            otherArmy.Id != army.Id &&
+            AreHostile(
+                army.OwnerId,
+                otherArmy.OwnerId));
     }
 }

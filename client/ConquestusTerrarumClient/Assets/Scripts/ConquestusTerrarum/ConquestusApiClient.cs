@@ -33,92 +33,181 @@ namespace ConquestusTerrarum.Client
 
             yield return Send(request, onSuccess, onError);
         }
-        
+
         public IEnumerator GetUpdates(
-    string matchId,
-    long after,
-    Action<MatchUpdatesDto> onSuccess,
-    Action<string> onError)
-{
-    var request = UnityWebRequest.Get(
-        $"{BaseUrl}/api/v1/matches/{matchId}/updates?after={after}");
-
-    request.timeout = 10;
-
-    using (request)
-    {
-        yield return request.SendWebRequest();
-
-        var body =
-            request.downloadHandler?.text ?? "";
-
-        if (request.result ==
-            UnityWebRequest.Result.Success)
+            string matchId,
+            long after,
+            Action<MatchUpdatesDto> onSuccess,
+            Action<string> onError)
         {
-            try
-            {
-                var updates =
-                    JsonUtility.FromJson<MatchUpdatesDto>(
-                        body);
+            var request = UnityWebRequest.Get(
+                $"{BaseUrl}/api/v1/matches/{matchId}/updates?after={after}");
 
-                if (updates == null)
+            request.timeout = 10;
+
+            using (request)
+            {
+                yield return request.SendWebRequest();
+
+                var body =
+                    request.downloadHandler?.text ?? "";
+
+                if (request.result ==
+                    UnityWebRequest.Result.Success)
                 {
-                    onError?.Invoke(
-                        "API returned invalid updates JSON.");
+                    try
+                    {
+                        var updates =
+                            JsonUtility.FromJson<MatchUpdatesDto>(
+                                body);
+
+                        if (updates == null)
+                        {
+                            onError?.Invoke(
+                                "API returned invalid updates JSON.");
+
+                            yield break;
+                        }
+
+                        onSuccess?.Invoke(
+                            updates);
+                    }
+                    catch (Exception exception)
+                    {
+                        onError?.Invoke(
+                            $"Updates JSON error: {exception.Message}");
+                    }
 
                     yield break;
                 }
 
-                onSuccess?.Invoke(
-                    updates);
-            }
-            catch (Exception exception)
-            {
-                onError?.Invoke(
-                    $"Updates JSON error: {exception.Message}");
-            }
+                var error =
+                    $"HTTP {request.responseCode}: {request.error}";
 
-            yield break;
-        }
-
-        var error =
-            $"HTTP {request.responseCode}: {request.error}";
-
-        if (!string.IsNullOrWhiteSpace(body))
-        {
-            try
-            {
-                var problem =
-                    JsonUtility.FromJson<ProblemDetailsDto>(
-                        body);
-
-                if (problem != null)
+                if (!string.IsNullOrWhiteSpace(body))
                 {
-                    if (!string.IsNullOrWhiteSpace(
-                            problem.code))
+                    try
                     {
-                        error +=
-                            $" [{problem.code}]";
-                    }
+                        var problem =
+                            JsonUtility.FromJson<ProblemDetailsDto>(
+                                body);
 
-                    if (!string.IsNullOrWhiteSpace(
-                            problem.detail))
+                        if (problem != null)
+                        {
+                            if (!string.IsNullOrWhiteSpace(
+                                    problem.code))
+                            {
+                                error +=
+                                    $" [{problem.code}]";
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(
+                                    problem.detail))
+                            {
+                                error +=
+                                    $" {problem.detail}";
+                            }
+                        }
+                    }
+                    catch
                     {
-                        error +=
-                            $" {problem.detail}";
+                        // Keep generic HTTP error.
                     }
                 }
-            }
-            catch
-            {
-                // Keep generic HTTP error.
+
+                onError?.Invoke(
+                    error);
             }
         }
 
-        onError?.Invoke(
-            error);
-    }
-}
+        public IEnumerator GetArmyDetails(
+            string matchId,
+            string armyId,
+            Action<ArmyDetailsDto> onSuccess,
+            Action<string> onError)
+        {
+            var request =
+                UnityWebRequest.Get(
+                    $"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/details");
+
+            request.timeout = 10;
+
+            using (request)
+            {
+                yield return request.SendWebRequest();
+
+                var body =
+                    request.downloadHandler?.text ?? "";
+
+                if (request.result ==
+                    UnityWebRequest.Result.Success)
+                {
+                    try
+                    {
+                        var details =
+                            JsonUtility.FromJson<ArmyDetailsDto>(
+                                body);
+
+                        if (details == null ||
+                            string.IsNullOrWhiteSpace(
+                                details.armyId))
+                        {
+                            onError?.Invoke(
+                                "API returned invalid army details JSON.");
+
+                            yield break;
+                        }
+
+                        onSuccess?.Invoke(
+                            details);
+                    }
+                    catch (Exception exception)
+                    {
+                        onError?.Invoke(
+                            $"Army details JSON error: {exception.Message}");
+                    }
+
+                    yield break;
+                }
+
+                var error =
+                    $"HTTP {request.responseCode}: {request.error}";
+
+                if (!string.IsNullOrWhiteSpace(body))
+                {
+                    try
+                    {
+                        var problem =
+                            JsonUtility.FromJson<ProblemDetailsDto>(
+                                body);
+
+                        if (problem != null)
+                        {
+                            if (!string.IsNullOrWhiteSpace(
+                                    problem.code))
+                            {
+                                error +=
+                                    $" [{problem.code}]";
+                            }
+
+                            if (!string.IsNullOrWhiteSpace(
+                                    problem.detail))
+                            {
+                                error +=
+                                    $" {problem.detail}";
+                            }
+                        }
+                    }
+                    catch
+                    {
+                        // Keep generic HTTP error.
+                    }
+                }
+
+                onError?.Invoke(
+                    error);
+            }
+        }
 
         public IEnumerator MoveArmy(
             string matchId,

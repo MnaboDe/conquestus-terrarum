@@ -2,13 +2,6 @@
 
 public sealed class Location
 {
-    public int CombatSlotCount { get; }
-
-    public Guid Id { get; }
-    public string Name { get; }
-
-    public Guid? OwnerId { get; private set; }
-
     public Location(
         Guid id,
         string name,
@@ -36,6 +29,13 @@ public sealed class Location
         Name = name;
         OwnerId = ownerId;
     }
+
+    public int CombatSlotCount { get; }
+
+    public Guid Id { get; }
+    public string Name { get; }
+
+    public Guid? OwnerId { get; private set; }
 
     internal void ChangeOwner(Guid? ownerId)
     {
