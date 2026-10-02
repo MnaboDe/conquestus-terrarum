@@ -7,7 +7,7 @@ namespace ConquestusTerrarum.Client
 {
     public sealed class MatchController : MonoBehaviour
     {
-        private const double RefreshSafetyDelaySeconds = 0.10;
+        private const float UpdatePollIntervalSeconds = 2f;
 
         public MatchStateDto State { get; private set; }
 
@@ -24,8 +24,11 @@ namespace ConquestusTerrarum.Client
         {
             get
             {
-                if (State == null || State.armies == null)
+                if (State == null ||
+                    State.armies == null)
+                {
                     return null;
+                }
 
                 return State.armies.FirstOrDefault(
                     army =>
@@ -42,8 +45,9 @@ namespace ConquestusTerrarum.Client
         private DateTimeOffset _serverTimeAnchor;
         private double _realtimeAnchor;
 
-        private Coroutine _scheduledRefresh;
-        private int _stateGeneration;
+        private Coroutine _updatePolling;
+        private long _updateCursor;
+        private bool _pollRequestInProgress;
 
         private void Awake()
         {
@@ -64,7 +68,7 @@ namespace ConquestusTerrarum.Client
 
         private void OnDestroy()
         {
-            CancelScheduledRefresh();
+            StopUpdatePolling();
         }
 
         public DateTimeOffset PresentationServerTime
@@ -88,7 +92,10 @@ namespace ConquestusTerrarum.Client
             if (IsBusy)
                 return;
 
-            CancelScheduledRefresh();
+            StopUpdatePolling();
+
+            _updateCursor = 0;
+            _pollRequestInProgress = false;
 
             IsBusy = true;
             SelectedArmyId = null;
@@ -101,6 +108,10 @@ namespace ConquestusTerrarum.Client
                     HandleError));
         }
 
+        /// <summary>
+        /// Manual full refresh remains useful for debugging,
+        /// but normal synchronization is driven by the change feed.
+        /// </summary>
         public void Refresh()
         {
             if (IsBusy ||
@@ -110,8 +121,6 @@ namespace ConquestusTerrarum.Client
             {
                 return;
             }
-
-            CancelScheduledRefresh();
 
             BeginRefresh(
                 "Refreshing...");
@@ -231,8 +240,6 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
-            CancelScheduledRefresh();
-
             IsBusy = true;
             LastError = null;
             Status = "Retreating...";
@@ -253,8 +260,6 @@ namespace ConquestusTerrarum.Client
 
             if (army == null)
                 return;
-
-            CancelScheduledRefresh();
 
             IsBusy = true;
             LastError = null;
@@ -291,45 +296,9 @@ namespace ConquestusTerrarum.Client
                     HandleError));
         }
 
-        private bool IsConnected(
-            string firstLocationId,
-            string secondLocationId)
-        {
-            if (State == null ||
-                State.connections == null)
-            {
-                return false;
-            }
-
-            return State.connections.Any(
-                connection =>
-                    connection != null &&
-                    (
-                        string.Equals(
-                            connection.fromLocationId,
-                            firstLocationId,
-                            StringComparison.Ordinal) &&
-                        string.Equals(
-                            connection.toLocationId,
-                            secondLocationId,
-                            StringComparison.Ordinal)
-                        ||
-                        string.Equals(
-                            connection.fromLocationId,
-                            secondLocationId,
-                            StringComparison.Ordinal) &&
-                        string.Equals(
-                            connection.toLocationId,
-                            firstLocationId,
-                            StringComparison.Ordinal)
-                    ));
-        }
-
         private void ApplyState(
             MatchStateDto state)
         {
-            CancelScheduledRefresh();
-
             State = state;
 
             if (!DateTimeOffset.TryParse(
@@ -341,8 +310,6 @@ namespace ConquestusTerrarum.Client
 
             _realtimeAnchor =
                 Time.realtimeSinceStartupAsDouble;
-
-            _stateGeneration++;
 
             if (!string.IsNullOrWhiteSpace(
                     SelectedArmyId))
@@ -383,14 +350,150 @@ namespace ConquestusTerrarum.Client
                     : 0) +
                 " armies.");
 
-            ScheduleNextKnownEvent();
+            StartUpdatePolling();
+        }
+
+        private void StartUpdatePolling()
+        {
+            if (_updatePolling != null)
+                return;
+
+            if (State == null ||
+                string.IsNullOrWhiteSpace(
+                    State.matchId))
+            {
+                return;
+            }
+
+            _updatePolling =
+                StartCoroutine(
+                    PollUpdatesLoop());
+        }
+
+        private void StopUpdatePolling()
+        {
+            if (_updatePolling == null)
+                return;
+
+            StopCoroutine(
+                _updatePolling);
+
+            _updatePolling = null;
+            _pollRequestInProgress = false;
+        }
+
+        private IEnumerator PollUpdatesLoop()
+        {
+            var wait =
+                new WaitForSecondsRealtime(
+                    UpdatePollIntervalSeconds);
+
+            while (true)
+            {
+                yield return wait;
+
+                if (State == null ||
+                    string.IsNullOrWhiteSpace(
+                        State.matchId))
+                {
+                    continue;
+                }
+
+                // Do not compete with a command or full refresh.
+                if (IsBusy ||
+                    _pollRequestInProgress)
+                {
+                    continue;
+                }
+
+                _pollRequestInProgress = true;
+
+                yield return StartCoroutine(
+                    _api.GetUpdates(
+                        State.matchId,
+                        _updateCursor,
+                        HandleUpdates,
+                        HandlePollingError));
+
+                _pollRequestInProgress = false;
+            }
+        }
+
+        private void HandleUpdates(
+            MatchUpdatesDto page)
+        {
+            if (page == null)
+                return;
+
+            long previousCursor =
+                _updateCursor;
+
+            if (page.nextCursor >
+                _updateCursor)
+            {
+                _updateCursor =
+                    page.nextCursor;
+            }
+
+            int updateCount =
+                page.updates != null
+                    ? page.updates.Length
+                    : 0;
+
+            if (updateCount == 0)
+                return;
+
+            Debug.Log(
+                "Received " +
+                updateCount +
+                " match update(s), cursor " +
+                previousCursor +
+                " -> " +
+                _updateCursor +
+                ".");
+
+            foreach (MatchUpdateDto update
+                     in page.updates)
+            {
+                if (update == null)
+                    continue;
+
+                Debug.Log(
+                    "Update #" +
+                    update.sequence +
+                    ": " +
+                    update.type);
+            }
+
+            // MVP behavior:
+            // the feed tells us THAT something changed.
+            // We then download one authoritative full snapshot.
+            //
+            // Later we can apply event payloads directly to the
+            // local presentation state and avoid this GET.
+            if (!IsBusy)
+            {
+                BeginRefresh(
+                    "Applying server updates...");
+            }
+        }
+
+        private void HandlePollingError(
+            string error)
+        {
+            // A temporary polling failure should not destroy the
+            // currently displayed playable state.
+            LastError = error;
+            Status = "Update polling failed.";
+
+            Debug.LogWarning(
+                "Change-feed polling failed: " +
+                error);
         }
 
         private void HandleError(
             string error)
         {
-            CancelScheduledRefresh();
-
             IsBusy = false;
             LastError = error;
             Status = "Request failed.";
@@ -398,181 +501,38 @@ namespace ConquestusTerrarum.Client
             Debug.LogError(error);
         }
 
-        private void ScheduleNextKnownEvent()
+        private bool IsConnected(
+            string firstLocationId,
+            string secondLocationId)
         {
-            if (State == null)
-                return;
-
-            DateTimeOffset? nextEvent =
-                FindEarliestKnownFutureEvent(
-                    State);
-
-            if (!nextEvent.HasValue)
-                return;
-
-            int generation =
-                _stateGeneration;
-
-            _scheduledRefresh =
-                StartCoroutine(
-                    WaitForKnownEventAndRefresh(
-                        nextEvent.Value,
-                        generation));
-        }
-
-        private IEnumerator WaitForKnownEventAndRefresh(
-            DateTimeOffset eventTime,
-            int expectedGeneration)
-        {
-            double secondsUntilEvent =
-                (eventTime -
-                 PresentationServerTime)
-                .TotalSeconds;
-
-            double delay =
-                Math.Max(
-                    0.05,
-                    secondsUntilEvent +
-                    RefreshSafetyDelaySeconds);
-
-            Debug.Log(
-                "Next authoritative refresh in " +
-                delay.ToString("0.00") +
-                "s for event at " +
-                eventTime.ToString("O"));
-
-            yield return new WaitForSecondsRealtime(
-                (float)delay);
-
-            if (expectedGeneration !=
-                _stateGeneration)
+            if (State == null ||
+                State.connections == null)
             {
-                yield break;
+                return false;
             }
 
-            if (IsBusy ||
-                State == null)
-            {
-                yield break;
-            }
-
-            // Coroutine больше не считается
-            // запланированной до начала GET.
-            _scheduledRefresh = null;
-
-            BeginRefresh(
-                "Refreshing after server event...");
-        }
-
-        private static DateTimeOffset?
-            FindEarliestKnownFutureEvent(
-                MatchStateDto state)
-        {
-            DateTimeOffset serverTime;
-
-            if (!DateTimeOffset.TryParse(
-                    state.serverTime,
-                    out serverTime))
-            {
-                return null;
-            }
-
-            DateTimeOffset? earliest =
-                null;
-
-            if (state.armies != null)
-            {
-                foreach (ArmyDto army
-                         in state.armies)
-                {
-                    if (army == null ||
-                        !army.isMoving ||
-                        army.movement == null)
-                    {
-                        continue;
-                    }
-
-                    ConsiderTimestamp(
-                        army.movement.arriveAt,
-                        serverTime,
-                        ref earliest);
-                }
-            }
-
-            if (state.activeBattles != null)
-            {
-                foreach (BattleDto battle
-                         in state.activeBattles)
-                {
-                    if (battle == null ||
-                        battle.combatSlots == null)
-                    {
-                        continue;
-                    }
-
-                    foreach (CombatSlotDto slot
-                             in battle.combatSlots)
-                    {
-                        if (slot == null)
-                            continue;
-
-                        ConsiderTimestamp(
-                            slot.firstDeathAt,
-                            serverTime,
-                            ref earliest);
-
-                        ConsiderTimestamp(
-                            slot.secondDeathAt,
-                            serverTime,
-                            ref earliest);
-                    }
-                }
-            }
-
-            return earliest;
-        }
-
-        private static void ConsiderTimestamp(
-            string value,
-            DateTimeOffset serverTime,
-            ref DateTimeOffset? earliest)
-        {
-            if (string.IsNullOrWhiteSpace(
-                    value))
-            {
-                return;
-            }
-
-            DateTimeOffset parsed;
-
-            if (!DateTimeOffset.TryParse(
-                    value,
-                    out parsed))
-            {
-                return;
-            }
-
-            // Уже обработанные события не должны
-            // создавать бесконечные GET циклы.
-            if (parsed <= serverTime)
-                return;
-
-            if (!earliest.HasValue ||
-                parsed < earliest.Value)
-            {
-                earliest = parsed;
-            }
-        }
-
-        private void CancelScheduledRefresh()
-        {
-            if (_scheduledRefresh == null)
-                return;
-
-            StopCoroutine(
-                _scheduledRefresh);
-
-            _scheduledRefresh = null;
+            return State.connections.Any(
+                connection =>
+                    connection != null &&
+                    (
+                        string.Equals(
+                            connection.fromLocationId,
+                            firstLocationId,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            connection.toLocationId,
+                            secondLocationId,
+                            StringComparison.Ordinal)
+                        ||
+                        string.Equals(
+                            connection.fromLocationId,
+                            secondLocationId,
+                            StringComparison.Ordinal) &&
+                        string.Equals(
+                            connection.toLocationId,
+                            firstLocationId,
+                            StringComparison.Ordinal)
+                    ));
         }
 
         private static string ShortId(

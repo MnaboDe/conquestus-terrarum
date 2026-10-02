@@ -119,4 +119,20 @@ namespace ConquestusTerrarum.Client
         public string code;
         public string traceId;
     }
+    
+    [Serializable]
+    public class MatchUpdatesDto
+    {
+        public long nextCursor;
+        public bool hasMore;
+        public MatchUpdateDto[] updates;
+    }
+
+    [Serializable]
+    public class MatchUpdateDto
+    {
+        public long sequence;
+        public string occurredAt;
+        public string type;
+    }
 }
