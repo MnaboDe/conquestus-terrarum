@@ -237,7 +237,8 @@ public sealed class PostgresMatchRepository(
                 reader.GetInt64(2);
         }
 
-        // Capture database time only AFTER obtaining the row lock.
+        // Capture authoritative database time only AFTER
+        // obtaining the match-row lock.
         var now =
             await ReadDatabaseTimeAsync(
                 connection,
@@ -252,8 +253,7 @@ public sealed class PostgresMatchRepository(
             now,
             world.CheckpointTime);
 
-        // Important:
-        // this snapshot is BEFORE lazy simulation and BEFORE command.
+        // Snapshot before lazy simulation and before the command.
         var before =
             world.CreateSnapshot();
 
@@ -266,8 +266,7 @@ public sealed class PostgresMatchRepository(
                 world,
                 now);
 
-        cancellationToken
-            .ThrowIfCancellationRequested();
+        cancellationToken.ThrowIfCancellationRequested();
 
         if (world.CheckpointTime != now)
         {
@@ -350,6 +349,266 @@ public sealed class PostgresMatchRepository(
             now);
     }
 
+    /// <summary>
+    /// Polls the durable change feed.
+    ///
+    /// Polling also wakes lazy simulation. If crossing the current
+    /// database time produces a meaningful client-visible transition,
+    /// the advanced snapshot and generated updates are persisted
+    /// atomically before the feed is returned.
+    ///
+    /// If simulation only changes continuous state such as battle HP
+    /// and checkpoint time, no snapshot write is performed. That interval
+    /// can be recomputed deterministically by the next authoritative
+    /// operation.
+    /// </summary>
+    public async Task<MatchUpdatesPage> ReadUpdatesAsync(
+        Guid matchId,
+        long after,
+        int limit = 100,
+        CancellationToken cancellationToken = default)
+    {
+        ValidateMatchId(matchId);
+
+        if (after < 0)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(after),
+                "Cursor cannot be negative.");
+        }
+
+        if (limit is < 1 or > 500)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(limit),
+                "Limit must be between 1 and 500.");
+        }
+
+        await using var connection =
+            await dataSource.OpenConnectionAsync(
+                cancellationToken);
+
+        await using var transaction =
+            await connection.BeginTransactionAsync(
+                IsolationLevel.ReadCommitted,
+                cancellationToken);
+
+        string json;
+        long version;
+        long nextUpdateSequence;
+
+        // Polling participates in the same per-match serialization
+        // as commands. This prevents two requests from advancing
+        // the same world independently.
+        await using (var command =
+                     new NpgsqlCommand(
+                         """
+                         SELECT
+                             state::text,
+                             version,
+                             next_update_sequence
+                         FROM matches
+                         WHERE id = $1
+                         FOR UPDATE
+                         """,
+                         connection,
+                         transaction))
+        {
+            command.Parameters.AddWithValue(
+                matchId);
+
+            await using var reader =
+                await command.ExecuteReaderAsync(
+                    cancellationToken);
+
+            if (!await reader.ReadAsync(
+                    cancellationToken))
+            {
+                throw new MatchNotFoundException(
+                    matchId);
+            }
+
+            json =
+                reader.GetString(0);
+
+            version =
+                reader.GetInt64(1);
+
+            nextUpdateSequence =
+                reader.GetInt64(2);
+        }
+
+        // Capture PostgreSQL time only after acquiring the match lock,
+        // exactly like ExecuteAsync.
+        var now =
+            await ReadDatabaseTimeAsync(
+                connection,
+                transaction,
+                cancellationToken);
+
+        var world =
+            WorldState.Restore(
+                _serializer.Deserialize(json));
+
+        EnsureTimeIsNotBehind(
+            now,
+            world.CheckpointTime);
+
+        var before =
+            world.CreateSnapshot();
+
+        // Merely polling the change feed is enough to wake
+        // deterministic lazy simulation.
+        WorldSimulator.AdvanceTo(
+            world,
+            now);
+
+        var afterSnapshot =
+            world.CreateSnapshot();
+
+        var generatedUpdates =
+            WorldUpdateDetector.Detect(
+                before,
+                afterSnapshot,
+                now);
+
+        var sequence =
+            nextUpdateSequence;
+
+        foreach (var update in generatedUpdates)
+        {
+            await InsertUpdateAsync(
+                connection,
+                transaction,
+                matchId,
+                sequence,
+                update,
+                cancellationToken);
+
+            sequence =
+                checked(sequence + 1);
+        }
+
+        if (generatedUpdates.Count != 0)
+        {
+            // Persist only when polling crossed a meaningful
+            // client-visible boundary.
+            //
+            // Empty polls should not continuously UPDATE matches.
+            var state =
+                _serializer.Serialize(
+                    afterSnapshot);
+
+            var nextVersion =
+                checked(version + 1);
+
+            await using var updateCommand =
+                new NpgsqlCommand(
+                    """
+                    UPDATE matches
+                    SET
+                        state = $1,
+                        version = $2,
+                        updated_at = $3,
+                        next_update_sequence = $4
+                    WHERE id = $5
+                    """,
+                    connection,
+                    transaction);
+
+            updateCommand.Parameters.AddWithValue(
+                NpgsqlDbType.Jsonb,
+                state);
+
+            updateCommand.Parameters.AddWithValue(
+                nextVersion);
+
+            updateCommand.Parameters.AddWithValue(
+                now);
+
+            updateCommand.Parameters.AddWithValue(
+                sequence);
+
+            updateCommand.Parameters.AddWithValue(
+                matchId);
+
+            await updateCommand.ExecuteNonQueryAsync(
+                cancellationToken);
+        }
+
+        var requestedRowCount =
+            checked(limit + 1);
+
+        await using var readCommand =
+            new NpgsqlCommand(
+                """
+                SELECT
+                    sequence,
+                    occurred_at,
+                    type,
+                    payload::text
+                FROM match_updates
+                WHERE match_id = $1
+                  AND sequence > $2
+                ORDER BY sequence
+                LIMIT $3
+                """,
+                connection,
+                transaction);
+
+        readCommand.Parameters.AddWithValue(
+            matchId);
+
+        readCommand.Parameters.AddWithValue(
+            after);
+
+        readCommand.Parameters.AddWithValue(
+            requestedRowCount);
+
+        var entries =
+            new List<MatchUpdateEntry>(
+                requestedRowCount);
+
+        await using (var reader =
+                     await readCommand.ExecuteReaderAsync(
+                         cancellationToken))
+        {
+            while (await reader.ReadAsync(
+                       cancellationToken))
+            {
+                entries.Add(
+                    new MatchUpdateEntry(
+                        reader.GetInt64(0),
+                        new DateTimeOffset(
+                            reader.GetDateTime(1)),
+                        reader.GetString(2),
+                        reader.GetString(3)));
+            }
+        }
+
+        var hasMore =
+            entries.Count > limit;
+
+        if (hasMore)
+        {
+            entries.RemoveAt(
+                entries.Count - 1);
+        }
+
+        var nextCursor =
+            entries.Count == 0
+                ? after
+                : entries[^1].Sequence;
+
+        await transaction.CommitAsync(
+            cancellationToken);
+
+        return new MatchUpdatesPage(
+            nextCursor,
+            hasMore,
+            entries);
+    }
+
     private static async Task InsertUpdateAsync(
         NpgsqlConnection connection,
         NpgsqlTransaction transaction,
@@ -381,6 +640,7 @@ public sealed class PostgresMatchRepository(
         command.Parameters.AddWithValue(
             sequence);
 
+        // PostgreSQL timestamptz through Npgsql requires UTC.
         command.Parameters.AddWithValue(
             update.OccurredAt.ToUniversalTime());
 
@@ -393,138 +653,6 @@ public sealed class PostgresMatchRepository(
 
         await command.ExecuteNonQueryAsync(
             cancellationToken);
-    }
-
-    public async Task<MatchUpdatesPage> ReadUpdatesAsync(
-        Guid matchId,
-        long after,
-        int limit = 100,
-        CancellationToken cancellationToken = default)
-    {
-        ValidateMatchId(matchId);
-
-        if (after < 0)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(after),
-                "Cursor cannot be negative.");
-        }
-
-        if (limit is < 1 or > 500)
-        {
-            throw new ArgumentOutOfRangeException(
-                nameof(limit),
-                "Limit must be between 1 and 500.");
-        }
-
-        await using var connection =
-            await dataSource.OpenConnectionAsync(
-                cancellationToken);
-
-        await using (var existsCommand =
-                     new NpgsqlCommand(
-                         """
-                         SELECT EXISTS (
-                             SELECT 1
-                             FROM matches
-                             WHERE id = $1
-                         )
-                         """,
-                         connection))
-        {
-            existsCommand.Parameters.AddWithValue(
-                matchId);
-
-            var exists =
-                (bool)(await existsCommand
-                    .ExecuteScalarAsync(
-                        cancellationToken))!;
-
-            if (!exists)
-            {
-                throw new MatchNotFoundException(
-                    matchId);
-            }
-        }
-
-        var requestedRowCount =
-            checked(limit + 1);
-
-        await using var command =
-            new NpgsqlCommand(
-                """
-                SELECT
-                    sequence,
-                    occurred_at,
-                    type,
-                    payload::text
-                FROM match_updates
-                WHERE match_id = $1
-                  AND sequence > $2
-                ORDER BY sequence
-                LIMIT $3
-                """,
-                connection);
-
-        command.Parameters.AddWithValue(
-            matchId);
-
-        command.Parameters.AddWithValue(
-            after);
-
-        command.Parameters.AddWithValue(
-            requestedRowCount);
-
-        var entries =
-            new List<MatchUpdateEntry>(
-                requestedRowCount);
-
-        await using var reader =
-            await command.ExecuteReaderAsync(
-                cancellationToken);
-
-        while (await reader.ReadAsync(
-                   cancellationToken))
-        {
-            var sequence =
-                reader.GetInt64(0);
-
-            var occurredAt =
-                new DateTimeOffset(
-                    reader.GetDateTime(1));
-
-            var type =
-                reader.GetString(2);
-
-            var payloadJson =
-                reader.GetString(3);
-
-            entries.Add(
-                new MatchUpdateEntry(
-                    sequence,
-                    occurredAt,
-                    type,
-                    payloadJson));
-        }
-
-        var hasMore =
-            entries.Count > limit;
-
-        if (hasMore)
-        {
-            entries.RemoveAt(
-                entries.Count - 1);
-        }
-
-        var nextCursor =
-            entries.Count == 0
-                ? after
-                : entries[^1].Sequence;
-
-        return new MatchUpdatesPage(
-            nextCursor,
-            hasMore,
-            entries);
     }
 
     private static void ValidateMatchId(

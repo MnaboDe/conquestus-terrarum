@@ -13,7 +13,7 @@ using System.Reflection;
 [assembly: System.Reflection.AssemblyCompanyAttribute("ConquestusTerrarum.Api")]
 [assembly: System.Reflection.AssemblyConfigurationAttribute("Debug")]
 [assembly: System.Reflection.AssemblyFileVersionAttribute("1.0.0.0")]
-[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+317c782d470783e978adb6c67ecee1c426c46ba4")]
+[assembly: System.Reflection.AssemblyInformationalVersionAttribute("1.0.0+e3e0a7f7c625054e49941a3990e3ec3e3d8e9e03")]
 [assembly: System.Reflection.AssemblyProductAttribute("ConquestusTerrarum.Api")]
 [assembly: System.Reflection.AssemblyTitleAttribute("ConquestusTerrarum.Api")]
 [assembly: System.Reflection.AssemblyVersionAttribute("1.0.0.0")]
