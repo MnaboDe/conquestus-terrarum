@@ -8,7 +8,8 @@ namespace ConquestusTerrarum.Persistence;
 public sealed record MatchExecutionResult<T>(
     T Value,
     long Version,
-    DateTimeOffset DatabaseTime);
+    DateTimeOffset DatabaseTime,
+    long UpdateCursor = 0);
 
 /// <summary>
 /// One row and one transaction per match.
@@ -346,7 +347,8 @@ public sealed class PostgresMatchRepository(
         return new MatchExecutionResult<T>(
             result,
             nextVersion,
-            now);
+            now,
+            checked(sequence - 1));
     }
 
     /// <summary>

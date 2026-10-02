@@ -300,6 +300,11 @@ namespace ConquestusTerrarum.Client
             MatchStateDto state)
         {
             State = state;
+            if (state.updateCursor > _updateCursor)
+            {
+                _updateCursor =
+                    state.updateCursor;
+            }
 
             if (!DateTimeOffset.TryParse(
                     state.serverTime,

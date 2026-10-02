@@ -6,6 +6,7 @@ namespace ConquestusTerrarum.Client
     {
         public string matchId;
         public long version;
+        public long updateCursor;
         public string serverTime;
         public string checkpointTime;
 

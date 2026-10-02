@@ -9,6 +9,7 @@ public sealed record MoveArmyRequest([property: JsonRequired] Guid DestinationLo
 public sealed record MatchStateResponse(
     Guid MatchId,
     long Version,
+    long UpdateCursor,
     DateTimeOffset ServerTime,
     DateTimeOffset CheckpointTime,
     IReadOnlyList<LocationResponse> Locations,

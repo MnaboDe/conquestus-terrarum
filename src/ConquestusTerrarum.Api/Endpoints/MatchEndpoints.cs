@@ -264,6 +264,7 @@ public static class MatchEndpoints
         return result.Value with
         {
             Version = result.Version,
+            UpdateCursor = result.UpdateCursor,
             ServerTime = result.DatabaseTime
         };
     }
