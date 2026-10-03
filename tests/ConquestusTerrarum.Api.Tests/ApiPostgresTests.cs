@@ -164,6 +164,48 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
         Assert.Equal(1, current.Version);
     }
 
+    [ApiPostgresFact]
+    [Trait("Category", "PostgresApi")]
+    public async Task RepeatedBattleDetailsReturnLiveHpWithoutWritingSnapshotOrFeed()
+    {
+        var id = Guid.NewGuid();
+        await new PostgresMatchRepository(database.DataSource).CreateAsync(id, databaseTime =>
+            new ConquestusTerrarum.Domain.World.WorldState(
+                new ConquestusTerrarum.Domain.World.GameMap([new(Id(1), "Battlefield")], []),
+                [Army(11, 21, 1, Unit(101, hp: 100000, dps: 10)), Army(12, 22, 1, Unit(102, hp: 100000, dps: 10))],
+                databaseTime));
+        await using var factory = new PostgresApiFactory(database.ConnectionString);
+        using var client = factory.CreateClient();
+        var before = await Storage();
+        decimal hp = 100000m;
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            await using var delay = database.DataSource.CreateCommand("SELECT pg_sleep(0.03)");
+            await delay.ExecuteNonQueryAsync();
+            var response = await client.GetAsync($"/api/v1/matches/{id}/armies/{Id(11)}/details");
+            response.EnsureSuccessStatusCode();
+            var details = (await response.Content.ReadFromJsonAsync<ArmyDetailsResponse>())!;
+            Assert.True(details.IsInBattle);
+            Assert.True(details.Units.Single().CurrentHitPoints < hp);
+            hp = details.Units.Single().CurrentHitPoints;
+            Assert.Equal(before, await Storage());
+        }
+
+        async Task<(string Json, long Version, DateTimeOffset Updated, long Sequence, string RowTransaction, long Entries)> Storage()
+        {
+            await using var command = database.DataSource.CreateCommand("""
+                SELECT state::text, version, updated_at, next_update_sequence, xmin::text,
+                    (SELECT count(*) FROM match_updates WHERE match_id = $1)
+                FROM matches WHERE id = $1
+                """);
+            command.Parameters.AddWithValue(id);
+            await using var reader = await command.ExecuteReaderAsync();
+            Assert.True(await reader.ReadAsync());
+            return (reader.GetString(0), reader.GetInt64(1), new DateTimeOffset(reader.GetDateTime(2)),
+                reader.GetInt64(3), reader.GetString(4), reader.GetInt64(5));
+        }
+    }
+
     private async Task<(string Json, long Version, DateTimeOffset Created)> Row(Guid matchId)
     {
         await using var command =

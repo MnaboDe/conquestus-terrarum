@@ -45,6 +45,15 @@ public sealed class PostgresFixture : IAsyncLifetime
     }
 }
 
+public sealed class PostgresTheoryAttribute : TheoryAttribute
+{
+    public PostgresTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CT_TEST_CONNECTION_STRING")))
+            Skip = "Set CT_TEST_CONNECTION_STRING to run PostgreSQL integration tests (see db/README.md).";
+    }
+}
+
 public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassFixture<PostgresFixture>
 {
     private readonly WorldSnapshotSerializer _serializer = new();
@@ -834,5 +843,56 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         Assert.Equal(
             before,
             await Row(id));
+
+        for (var attempt = 0; attempt < 3; attempt++)
+        {
+            var live = await Repository.QueryCurrentAsync(id, (snapshot, _) =>
+                snapshot.Armies.Single(army => army.Id == Id(11)).Units.Single().CurrentHitPoints);
+            Assert.True(live.Value <= result.Value);
+            Assert.Equal(0, live.Version);
+            Assert.Equal(0, live.UpdateCursor);
+            Assert.Equal(before, await Row(id));
+        }
+        Assert.Empty((await Repository.ReadUpdatesAsync(id, 0)).Updates);
+        Assert.Equal(before, await Row(id));
+    }
+
+    [PostgresTheory]
+    [InlineData(false)]
+    [InlineData(true)]
+    [Trait("Category", "Postgres")]
+    public async Task QueryCurrentCommitsMeaningfulTransitionAndFeedAtomicallyOrRollsBack(bool failQuery)
+    {
+        var id = Guid.NewGuid();
+        var world = new WorldState(new GameMap([new Location(Id(1), "Battlefield")], []),
+            [Army(11, 21, 1, Unit(101, hp: 1, dps: 1)), Army(12, 22, 1, Unit(102, hp: 1, dps: 1))],
+            new DateTimeOffset(2000, 1, 1, 0, 0, 0, TimeSpan.Zero));
+        await Repository.CreateAsync(id, world);
+        var before = await Row(id);
+        if (failQuery)
+        {
+            await Assert.ThrowsAsync<InvalidOperationException>(() => Repository.QueryCurrentAsync<int>(id,
+                (_, _) => throw new InvalidOperationException("query failed")));
+            Assert.Equal(before, await Row(id));
+            await using var count = database.DataSource.CreateCommand("SELECT count(*) FROM match_updates WHERE match_id = $1");
+            count.Parameters.AddWithValue(id);
+            Assert.Equal(0L, await count.ExecuteScalarAsync());
+            return;
+        }
+        var result = await Repository.QueryCurrentAsync(id, (snapshot, _) => snapshot);
+        Assert.Equal(1, result.Version);
+        Assert.Equal(3, result.UpdateCursor);
+        Assert.Empty(result.Value.Battles);
+        Assert.All(result.Value.Armies, army => Assert.All(army.Units, unit => Assert.Equal(0m, unit.CurrentHitPoints)));
+        var saved = await Row(id);
+        Assert.Equal(result.DatabaseTime, saved.Updated);
+        var updates = await Repository.ReadUpdatesAsync(id, 0);
+        Assert.Equal(3, updates.Updates.Count);
+        Assert.Equal(2, updates.Updates.Count(update => update.Type == "ArmyDestroyed"));
+        Assert.Single(updates.Updates, update => update.Type == "BattleEnded");
+        var again = await Repository.QueryCurrentAsync(id, (snapshot, _) => snapshot);
+        Assert.Equal(1, again.Version);
+        Assert.Equal(3, again.UpdateCursor);
+        Assert.Equal(saved, await Row(id));
     }
 }

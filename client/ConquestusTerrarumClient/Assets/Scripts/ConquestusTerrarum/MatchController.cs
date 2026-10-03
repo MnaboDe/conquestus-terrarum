@@ -52,6 +52,8 @@ namespace ConquestusTerrarum.Client
 
         private Coroutine _battleDetailPolling;
         private bool _battleDetailRequestInProgress;
+        private long _stateGeneration;
+        private bool _requiresFullRefresh;
 
         private void Awake()
         {
@@ -97,6 +99,7 @@ namespace ConquestusTerrarum.Client
             if (IsBusy)
                 return;
 
+            _requiresFullRefresh = false;
             StopUpdatePolling();
             StopBattleDetailPolling();
 
@@ -104,6 +107,7 @@ namespace ConquestusTerrarum.Client
             _pollRequestInProgress = false;
             _battleDetailRequestInProgress = false;
 
+            _stateGeneration++;
             IsBusy = true;
             SelectedArmyId = null;
             LastError = null;
@@ -165,7 +169,7 @@ namespace ConquestusTerrarum.Client
         public void ClickLocation(
             string locationId)
         {
-            if (IsBusy)
+            if (IsBusy || _requiresFullRefresh)
                 return;
 
             ArmyDto army =
@@ -236,7 +240,7 @@ namespace ConquestusTerrarum.Client
 
         public void RetreatSelectedArmy()
         {
-            if (IsBusy)
+            if (IsBusy || _requiresFullRefresh)
                 return;
 
             ArmyDto army =
@@ -248,6 +252,7 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
+            _stateGeneration++;
             IsBusy = true;
             LastError = null;
             Status = "Retreating...";
@@ -269,6 +274,7 @@ namespace ConquestusTerrarum.Client
             if (army == null)
                 return;
 
+            _stateGeneration++;
             IsBusy = true;
             LastError = null;
             Status =
@@ -293,6 +299,7 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
+            _stateGeneration++;
             IsBusy = true;
             LastError = null;
             Status = status;
@@ -310,14 +317,11 @@ namespace ConquestusTerrarum.Client
             if (state == null)
                 return;
 
+            _stateGeneration++;
+            _requiresFullRefresh = false;
             State = state;
 
-            if (state.updateCursor >
-                _updateCursor)
-            {
-                _updateCursor =
-                    state.updateCursor;
-            }
+            _updateCursor = state.updateCursor;
 
             if (!DateTimeOffset.TryParse(
                     state.serverTime,
@@ -425,268 +429,57 @@ namespace ConquestusTerrarum.Client
                 }
 
                 if (IsBusy ||
-                    _pollRequestInProgress)
+                    _pollRequestInProgress || _battleDetailRequestInProgress)
                 {
                     continue;
                 }
 
-                _pollRequestInProgress =
-                    true;
+                if (_requiresFullRefresh)
+                {
+                    BeginRefresh("Resyncing server state...");
+                    continue;
+                }
 
-                yield return StartCoroutine(
-                    _api.GetUpdates(
-                        State.matchId,
-                        _updateCursor,
-                        HandleUpdates,
-                        HandlePollingError));
+                var generation = _stateGeneration;
+                var matchId = State.matchId;
+                _pollRequestInProgress = true;
+                yield return StartCoroutine(_api.GetUpdates(matchId, _updateCursor,
+                    page => { if (IsCurrentRequest(generation, matchId)) HandleUpdates(page); },
+                    error => { if (IsCurrentRequest(generation, matchId)) HandlePollingError(error); }));
 
                 _pollRequestInProgress =
                     false;
             }
         }
 
-        private void HandleUpdates(
-            MatchUpdatesDto page)
+        private void HandleUpdates(MatchUpdatesDto page)
         {
-            if (page == null)
-                return;
-
-            long previousCursor =
-                _updateCursor;
-
-            if (page.nextCursor >
-                _updateCursor)
+            MatchStateDto updated;
+            long cursor;
+            if (!MatchUpdateApplier.TryApplyPage(State, page, _updateCursor, out updated, out cursor))
             {
-                _updateCursor =
-                    page.nextCursor;
-            }
-
-            int updateCount =
-                page.updates != null
-                    ? page.updates.Length
-                    : 0;
-
-            if (updateCount == 0)
-                return;
-
-            Debug.Log(
-                "Received " +
-                updateCount +
-                " match update(s), cursor " +
-                previousCursor +
-                " -> " +
-                _updateCursor +
-                ".");
-
-            bool requiresFullRefresh =
-                false;
-
-            foreach (MatchUpdateDto update
-                     in page.updates)
-            {
-                if (update == null)
-                    continue;
-
-                Debug.Log(
-                    "Update #" +
-                    update.sequence +
-                    ": " +
-                    update.type);
-
-                if (!TryApplySimpleUpdate(
-                        update))
-                {
-                    requiresFullRefresh =
-                        true;
-                }
-            }
-
-            if (State != null)
-            {
-                State.updateCursor =
-                    _updateCursor;
-            }
-
-            if (requiresFullRefresh)
-            {
-                if (!IsBusy)
-                {
-                    BeginRefresh(
-                        "Applying server updates...");
-                }
-
+                RequireFullRefresh();
                 return;
             }
-
+            // Replace the DTO only after the entire page succeeds, so map views rebuild.
+            State = updated;
+            _updateCursor = cursor;
             LastError = null;
-
-            Status =
-                "Synced. Cursor " +
-                _updateCursor;
+            Status = "Synced. Cursor " + cursor;
         }
 
-        private bool TryApplySimpleUpdate(
-            MatchUpdateDto update)
+        private void RequireFullRefresh()
         {
-            if (update == null ||
-                update.payload == null ||
-                State == null)
-            {
-                return false;
-            }
-
-            switch (update.type)
-            {
-                case "ArmyMovementStarted":
-                    return ApplyArmyMovementStarted(
-                        update);
-
-                case "LocationOwnerChanged":
-                    return ApplyLocationOwnerChanged(
-                        update);
-
-                default:
-                    // Arrival, battle, retreat and destruction can
-                    // modify several related pieces of state.
-                    // For now we resync those with a full snapshot.
-                    return false;
-            }
+            // Do not acknowledge an unsafe page before a full snapshot succeeds.
+            // Keep this pending on failure so polling cannot silently skip its events.
+            _requiresFullRefresh = true;
+            if (!IsBusy) BeginRefresh("Applying server updates...");
         }
 
-        private bool ApplyArmyMovementStarted(
-            MatchUpdateDto update)
+        private bool IsCurrentRequest(long generation, string matchId)
         {
-            if (State == null ||
-                State.armies == null)
-            {
-                return false;
-            }
-
-            MatchUpdatePayloadDto payload =
-                update.payload;
-
-            if (payload == null ||
-                string.IsNullOrWhiteSpace(
-                    payload.armyId) ||
-                string.IsNullOrWhiteSpace(
-                    payload.fromLocationId) ||
-                string.IsNullOrWhiteSpace(
-                    payload.toLocationId) ||
-                string.IsNullOrWhiteSpace(
-                    payload.startedAt) ||
-                string.IsNullOrWhiteSpace(
-                    payload.arriveAt))
-            {
-                return false;
-            }
-
-            ArmyDto army =
-                State.armies.FirstOrDefault(
-                    candidate =>
-                        candidate != null &&
-                        string.Equals(
-                            candidate.id,
-                            payload.armyId,
-                            StringComparison.Ordinal));
-
-            if (army == null)
-                return false;
-
-            if (!string.IsNullOrWhiteSpace(
-                    army.locationId) &&
-                !string.Equals(
-                    army.locationId,
-                    payload.fromLocationId,
-                    StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            if (!string.IsNullOrWhiteSpace(
-                    payload.ownerId) &&
-                !string.Equals(
-                    army.ownerId,
-                    payload.ownerId,
-                    StringComparison.Ordinal))
-            {
-                return false;
-            }
-
-            army.locationId = null;
-            army.enteredLocationAt = null;
-
-            army.isMoving = true;
-            army.isInBattle = false;
-            army.canRetreat = false;
-            army.retreatLocationId = null;
-
-            army.movement =
-                new MovementDto
-                {
-                    fromLocationId =
-                        payload.fromLocationId,
-
-                    toLocationId =
-                        payload.toLocationId,
-
-                    startedAt =
-                        payload.startedAt,
-
-                    arriveAt =
-                        payload.arriveAt,
-
-                    kind =
-                        "normal"
-                };
-
-            Debug.Log(
-                "Applied ArmyMovementStarted locally for " +
-                ShortId(army.id) +
-                ".");
-
-            return true;
-        }
-
-        private bool ApplyLocationOwnerChanged(
-            MatchUpdateDto update)
-        {
-            if (State == null ||
-                State.locations == null)
-            {
-                return false;
-            }
-
-            MatchUpdatePayloadDto payload =
-                update.payload;
-
-            if (payload == null ||
-                string.IsNullOrWhiteSpace(
-                    payload.locationId))
-            {
-                return false;
-            }
-
-            LocationDto location =
-                State.locations.FirstOrDefault(
-                    candidate =>
-                        candidate != null &&
-                        string.Equals(
-                            candidate.id,
-                            payload.locationId,
-                            StringComparison.Ordinal));
-
-            if (location == null)
-                return false;
-
-            location.ownerId =
-                payload.ownerId;
-
-            Debug.Log(
-                "Applied LocationOwnerChanged locally for " +
-                ShortId(location.id) +
-                ".");
-
-            return true;
+            return generation == _stateGeneration && !IsBusy && State != null &&
+                string.Equals(State.matchId, matchId, StringComparison.Ordinal);
         }
 
         private void HandlePollingError(
@@ -737,7 +530,7 @@ namespace ConquestusTerrarum.Client
                 yield return wait;
 
                 if (IsBusy ||
-                    _battleDetailRequestInProgress ||
+                    _battleDetailRequestInProgress || _pollRequestInProgress || _requiresFullRefresh ||
                     State == null ||
                     string.IsNullOrWhiteSpace(
                         State.matchId))
@@ -763,18 +556,18 @@ namespace ConquestusTerrarum.Client
                 string requestedMatchId =
                     State.matchId;
 
-                _battleDetailRequestInProgress =
-                    true;
-
-                yield return StartCoroutine(
-                    _api.GetArmyDetails(
-                        requestedMatchId,
-                        requestedArmyId,
-                        details =>
-                            ApplyArmyDetails(
-                                requestedArmyId,
-                                details),
-                        HandleBattleDetailError));
+                var generation = _stateGeneration;
+                _battleDetailRequestInProgress = true;
+                yield return StartCoroutine(_api.GetArmyDetails(requestedMatchId, requestedArmyId,
+                    details =>
+                    {
+                        if (IsCurrentRequest(generation, requestedMatchId))
+                            ApplyArmyDetails(requestedArmyId, details);
+                    },
+                    error =>
+                    {
+                        if (IsCurrentRequest(generation, requestedMatchId)) HandleBattleDetailError(error);
+                    }));
 
                 _battleDetailRequestInProgress =
                     false;
@@ -815,24 +608,16 @@ namespace ConquestusTerrarum.Client
             if (army == null)
                 return;
 
-            army.isDestroyed =
-                details.isDestroyed;
-
-            army.isInBattle =
-                details.isInBattle;
-
-            army.canRetreat =
-                details.canRetreat;
-
-            army.retreatLocationId =
-                details.retreatLocationId;
-
-            if (details.units != null)
+            // A detail response lacks map state and battle slots. It may refresh HP,
+            // but a structural transition needs one authoritative full snapshot.
+            if (details.units == null || army.isDestroyed != details.isDestroyed ||
+                army.isInBattle != details.isInBattle || army.canRetreat != details.canRetreat ||
+                !string.Equals(army.retreatLocationId, details.retreatLocationId, StringComparison.Ordinal))
             {
-                army.units =
-                    details.units;
+                RequireFullRefresh();
+                return;
             }
-
+            army.units = details.units;
             // The detail response was calculated at this
             // authoritative server timestamp.
             DateTimeOffset serverTime;
