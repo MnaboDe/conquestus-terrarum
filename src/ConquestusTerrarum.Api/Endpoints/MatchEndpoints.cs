@@ -4,6 +4,7 @@ using ConquestusTerrarum.Api.Contracts;
 using ConquestusTerrarum.Api.Development;
 using ConquestusTerrarum.Api.ErrorHandling;
 using ConquestusTerrarum.Api.Mapping;
+using ConquestusTerrarum.Api.Sessions;
 using ConquestusTerrarum.Domain.World;
 using ConquestusTerrarum.Persistence;
 using Microsoft.AspNetCore.Http.Features;
@@ -33,20 +34,24 @@ public static class MatchEndpoints
             return await next(context);
         });
 
+        Describe(api.MapPost("/matches", CreateMatch).WithName("CreateMatch"));
+        Describe(api.MapPost("/matches/join", JoinMatch).WithName("JoinMatch"));
+        var protectedApi = api.MapGroup("").AddEndpointFilter<MatchPlayerFilter>();
+
         Describe(
-            api.MapGet(
+            protectedApi.MapGet(
                     "/matches/{matchId}",
                     Get)
                 .WithName("GetMatch"));
 
         Describe(
-            api.MapPost(
+            protectedApi.MapPost(
                     "/matches/{matchId}/armies/{armyId}/move",
                     Move)
                 .WithName("MoveArmy"));
 
         Describe(
-            api.MapPost(
+            protectedApi.MapPost(
                     "/matches/{matchId}/armies/{armyId}/retreat",
                     Retreat)
                 .WithName("RetreatArmy"));
@@ -67,9 +72,10 @@ public static class MatchEndpoints
                     "/api/v1/matches/{matchId}/updates",
                     GetUpdates)
                 .WithTags("Matches")
+                .AddEndpointFilter<MatchPlayerFilter>()
                 .WithName("GetMatchUpdates"));
         Describe(
-            api.MapGet(
+            protectedApi.MapGet(
                     "/matches/{matchId}/armies/{armyId}/details",
                     GetArmyDetails)
                 .WithName("GetArmyDetails"));
@@ -80,6 +86,8 @@ public static class MatchEndpoints
     {
         route
             .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
             .ProducesProblem(404)
             .ProducesProblem(409)
             .ProducesProblem(500)
@@ -235,6 +243,7 @@ public static class MatchEndpoints
         Guid matchId,
         Guid armyId,
         MoveArmyRequest request,
+        MatchPlayer player,
         IMatchRepository repository,
         CancellationToken cancellationToken)
     {
@@ -255,10 +264,13 @@ public static class MatchEndpoints
                 matchId,
                 repository,
                 (world, time) =>
+                {
+                    RequireOwnership(world, armyId, player.PlayerId);
                     world.StartMovement(
                         armyId,
                         request.DestinationLocationId,
-                        time),
+                        time);
+                },
                 cancellationToken));
     }
 
@@ -266,6 +278,7 @@ public static class MatchEndpoints
         Guid matchId,
         Guid armyId,
         HttpRequest request,
+        MatchPlayer player,
         IMatchRepository repository,
         CancellationToken cancellationToken)
     {
@@ -285,9 +298,12 @@ public static class MatchEndpoints
                 matchId,
                 repository,
                 (world, time) =>
+                {
+                    RequireOwnership(world, armyId, player.PlayerId);
                     world.Retreat(
                         armyId,
-                        time),
+                        time);
+                },
                 cancellationToken));
     }
 
@@ -331,6 +347,23 @@ public static class MatchEndpoints
             ServerTime = result.DatabaseTime
         };
     }
+
+    private static void RequireOwnership(WorldState world, Guid armyId, Guid playerId)
+    {
+        if (world.GetArmy(armyId).OwnerId != playerId) throw new ArmyOwnershipException();
+    }
+
+    private static async Task<Created<CreateMatchResponse>> CreateMatch(
+        HttpRequest request, MatchSessionService sessions, CancellationToken cancellationToken)
+    {
+        RequireNoBody(request);
+        var response = await sessions.CreateAsync(cancellationToken);
+        return TypedResults.Created($"/api/v1/matches/{response.MatchId}", response);
+    }
+
+    private static async Task<Ok<JoinMatchResponse>> JoinMatch(
+        JoinMatchRequest request, MatchSessionService sessions, CancellationToken cancellationToken) =>
+        TypedResults.Ok(await sessions.JoinAsync(request, cancellationToken));
 
     private static async Task<Created<MatchStateResponse>>
         CreateDevelopmentMatch(

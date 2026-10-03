@@ -3,17 +3,17 @@
 
 CREATE TABLE match_updates
 (
-    match_id    uuid        NOT NULL
-        REFERENCES matches (id)
+    match_id uuid NOT NULL
+        REFERENCES matches(id)
             ON DELETE CASCADE,
 
-    sequence    bigint      NOT NULL,
+    sequence bigint NOT NULL,
 
     occurred_at timestamptz NOT NULL,
 
-    type        text        NOT NULL,
+    type text NOT NULL,
 
-    payload     jsonb       NOT NULL DEFAULT '{}'::jsonb,
+    payload jsonb NOT NULL DEFAULT '{}'::jsonb,
 
     PRIMARY KEY (match_id, sequence)
 );

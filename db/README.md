@@ -52,6 +52,15 @@ consistent command/event checkpoint, not a partially applied event phase.
 
 ## Repository and time
 
+Multiplayer access metadata lives in the migration `003_create_match_sessions.sql` sidecar tables,
+`match_sessions` and `match_players`. `PostgresMatchSessionRepository.CreateAsync` uses the existing match repository's
+transactional world insertion, then creates the session and both reserved identities before committing. Failure leaves
+neither an orphan match nor a partial session. Slot 1 starts claimed; slot 2 has no hash or joined timestamp until join.
+Join serializes claims using a session-row lock and a conditional slot-2 update. Player IDs are unique within each match,
+slot numbers are constrained to 1/2, and token hashes and retained join codes are unique. All session state is durable
+PostgreSQL data and requires no extensions, so separate API processes share the same authorization and join invariants.
+Raw player credentials never enter the database or the simulation snapshot. See the API guide for create/join contracts.
+
 Construct a reusable caller-owned `NpgsqlDataSource` and pass it to
 `PostgresMatchRepository`. The **normal production match-creation path** is
 `CreateAsync(matchId, databaseTime => new WorldState(map, armies, databaseTime))`.

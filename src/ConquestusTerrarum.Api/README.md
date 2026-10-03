@@ -1,4 +1,4 @@
-# HTTP API MVP
+# Two-player HTTP API MVP
 
 Requires .NET 10 and Docker Compose. From the repository root in PowerShell:
 
@@ -13,7 +13,8 @@ dotnet run --project src/ConquestusTerrarum.Api --launch-profile http
 These credentials are local development only. This launch profile selects Development and HTTP port 5108. Migrations run
 explicitly through the CLI; the API never runs migrations or background simulation. DI owns one reusable singleton
 `NpgsqlDataSource`
-configured by `ConnectionStrings:Postgres`, and a singleton `IMatchRepository` implemented by `PostgresMatchRepository`.
+configured by `ConnectionStrings:Postgres`, `IMatchRepository` implemented by `PostgresMatchRepository`, and
+`IMatchSessionRepository` implemented by `PostgresMatchSessionRepository`.
 The environment variable overrides development appsettings.
 
 ## Try the routes
@@ -23,14 +24,31 @@ In a second PowerShell window:
 ```powershell
 $base = 'http://localhost:5108'
 Invoke-RestMethod "$base/openapi/v1.json"
-$state = Invoke-RestMethod "$base/api/v1/dev/matches" -Method Post
-$matchId = $state.matchId
-$state = Invoke-RestMethod "$base/api/v1/matches/$matchId"
+$first = Invoke-RestMethod "$base/api/v1/matches" -Method Post
+$matchId = $first.matchId
+$firstHeaders = @{ Authorization = "Bearer $($first.playerToken)" }
+# Share only the join code with the second player.
+$joinBody = @{ joinCode = $first.joinCode } | ConvertTo-Json
+$second = Invoke-RestMethod "$base/api/v1/matches/join" -Method Post -ContentType 'application/json' -Body $joinBody
+$secondHeaders = @{ Authorization = "Bearer $($second.playerToken)" }
+$state = Invoke-RestMethod "$base/api/v1/matches/$matchId" -Headers $firstHeaders
 ```
 
-Creation returns 201, a Location header, and the full MatchStateResponse including matchId and version 0. Creation and
-OpenAPI exist only in Development (404 elsewhere). The demo contains four locations, five armies, two allied players and
-a hostile player. Demo unit stats are illustrative, not a production balance specification.
+Production creation returns 201, a Location header, and `{ matchId, playerId, playerToken, joinCode }`.
+It accepts no body or query parameters and creates a fixed four-location map with two armies per player.
+The second identity is reserved in the initial world before joining. Join returns 200 and
+`{ matchId, playerId, playerToken }`; it accepts only `joinCode`, normalized by trimming outer whitespace and uppercasing.
+Codes contain six unambiguous uppercase letters/digits. A well-formed unknown code returns 404, malformed input 400,
+and a claimed second slot 409. Concurrent claims cannot both succeed. Unit stats are MVP values.
+
+The bearer token is a secret: keep it private and retain it locally before using protected routes. The raw token is
+returned only by create/join; there is no recovery endpoint, permanent account, password, or token refresh in this MVP.
+Do not log credentials or Authorization headers. Join codes grant the open second slot and are separate from credentials.
+
+`POST /api/v1/dev/matches` and OpenAPI remain Development-only (404 elsewhere). Development creation retains its original
+full-snapshot response and three-owner demo world, without issuing session credentials. Use production creation for
+authenticated multiplayer; existing tests can seed sidecar credentials for development/import worlds. All production
+match routes require authentication, including in Development. Unity's Create/Join and credential flow is the next milestone.
 
 Move armies from both camps to Crossroads, then retreat after combat starts. Run this whole block together so the battle
 is still active when retreat is requested:
@@ -39,14 +57,14 @@ is still active when retreat is requested:
 $west = ($state.locations | Where-Object name -eq 'West camp').id
 $east = ($state.locations | Where-Object name -eq 'East camp').id
 $crossroads = ($state.locations | Where-Object name -eq 'Crossroads').id
-$westArmy = ($state.armies | Where-Object locationId -eq $west | Select-Object -First 1).id
-$eastArmy = ($state.armies | Where-Object locationId -eq $east | Select-Object -First 1).id
+$westArmy = ($state.armies | Where-Object ownerId -eq $first.playerId | Select-Object -First 1).id
+$eastArmy = ($state.armies | Where-Object ownerId -eq $second.playerId | Select-Object -First 1).id
 $body = @{ destinationLocationId = $crossroads } | ConvertTo-Json
-$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$westArmy/move" -Method Post -ContentType 'application/json' -Body $body
-$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$eastArmy/move" -Method Post -ContentType 'application/json' -Body $body
+$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$westArmy/move" -Headers $firstHeaders -Method Post -ContentType 'application/json' -Body $body
+$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$eastArmy/move" -Headers $secondHeaders -Method Post -ContentType 'application/json' -Body $body
 Start-Sleep -Seconds 6
-$state = Invoke-RestMethod "$base/api/v1/matches/$matchId"
-$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$westArmy/retreat" -Method Post
+$state = Invoke-RestMethod "$base/api/v1/matches/$matchId" -Headers $firstHeaders
+$state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$westArmy/retreat" -Headers $firstHeaders -Method Post
 $state.armies | Where-Object id -eq $westArmy
 ```
 
@@ -58,6 +76,22 @@ parameters, including command timestamps.
 Stop the API with Ctrl+C, then `docker compose stop` to retain database data.
 
 ## Contract and transactions
+
+The snapshot, updates, move, retreat, and army-details routes require `Authorization: Bearer <playerToken>`.
+One endpoint filter resolves the authenticated player from a match-scoped SHA-256 token hash in PostgreSQL.
+Missing, malformed, invalid, or another match's credentials return 401 with a Bearer challenge. A nonempty valid-format
+token targeting a missing match returns 404. The authenticated player is available in request-scoped `MatchPlayer` for
+future per-player read projections. Both players currently see the full map, global feed, and army details; no fog of war.
+Move and retreat check `army.OwnerId` inside the existing locked match transaction and return 403 for another player's army.
+Rejected commands roll back lazy advancement, snapshot/version changes, and feed entries together.
+
+Session creation inserts the authoritative match and both player slots in one transaction. Session metadata stays outside
+WorldSnapshot: only player identities appear as army/location ownership. Tokens have 256 bits of secure random entropy,
+encoded as Base64Url; PostgreSQL stores 32-byte SHA-256 hashes of that encoded credential. Joining locks the session row,
+then conditionally updates only the unclaimed second slot. Database keys/checks enforce two possible slot numbers,
+distinct identities within a match, hash uniqueness, and consistent claim timestamps. Codes remain unique after a match
+fills, allowing repeat joins to receive 409. Join claims do not change simulation state or emit global feed entries.
+These operations use PostgreSQL only, with no process-local authoritative session state or extension requirements.
 
 GET `/api/v1/matches/{matchId}`, POST `/api/v1/matches/{matchId}/armies/{armyId}/move`
 and POST `/api/v1/matches/{matchId}/armies/{armyId}/retreat` return the same explicit client contract. Each executes one
@@ -80,7 +114,8 @@ timestamps; travel times are integer TimeSpan ticks (100 ns). HP/DPS are decimal
 World random seed, battle RNG state and persistence snapshots are not exposed. The complete Development schema is
 available at `/openapi/v1.json`.
 
-Handled errors use application/problem+json with status, title, detail, type, code and traceId. Missing match is 404;
+Handled errors use application/problem+json with status, title, detail, type, code and traceId. Authentication is 401;
+foreign-army commands are 403; missing match or unknown join code is 404; a full match is 409;
 invalid input is 400 (unsupported content type can be 415); illegal gameplay is 409; database clock behind the
 checkpoint or transient database failure is 503; corrupt state and unexpected failures are 500 with sanitized details.
 Exception stack traces stay out of responses.
@@ -100,8 +135,9 @@ Without the test connection string, PostgreSQL tests are skipped. Enabled tests 
 disposable local database with schema creation rights. Normal API tests replace the repository and exercise real
 routing, validation, mapping and domain commands without PostgreSQL.
 
-This local MVP has no authentication, authorization, ownership enforcement or player-specific visibility: callers see
-the full match and can command any army. Production access control, visibility, command idempotency/retry policy,
-transport deployment and Unity remain later work. There is no push or polling service. A connection failure during
+Player-specific visibility, command idempotency/retry policy, transport deployment and Unity's credential flow
+remain later work. The existing cursor-based updates route and focused army-details polling are preserved;
+continuous HP does not generate global feed entries or force detail-poll snapshot writes. There is no background simulation
+or push service. A connection failure during
 commit can leave the caller uncertain whether a command committed; commands are not retried automatically. Gameplay is
 unchanged, including the unresolved ownership rule after mutual annihilation.

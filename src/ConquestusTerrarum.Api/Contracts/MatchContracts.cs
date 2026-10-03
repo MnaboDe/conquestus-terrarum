@@ -3,6 +3,12 @@ using System.Text.Json.Serialization;
 
 namespace ConquestusTerrarum.Api.Contracts;
 
+public sealed record CreateMatchResponse(Guid MatchId, Guid PlayerId, string PlayerToken, string JoinCode);
+public sealed record JoinMatchResponse(Guid MatchId, Guid PlayerId, string PlayerToken);
+
+[JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
+public sealed record JoinMatchRequest([property: JsonRequired] string JoinCode);
+
 [JsonUnmappedMemberHandling(JsonUnmappedMemberHandling.Disallow)]
 public sealed record MoveArmyRequest([property: JsonRequired] Guid DestinationLocationId);
 

@@ -41,6 +41,19 @@ public sealed class PostgresMatchRepository(
                 IsolationLevel.ReadCommitted,
                 cancellationToken);
 
+        await CreateInTransactionAsync(connection, transaction, matchId, worldFactory, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+    }
+
+    internal async Task<DateTimeOffset> CreateInTransactionAsync(
+        NpgsqlConnection connection,
+        NpgsqlTransaction transaction,
+        Guid matchId,
+        Func<DateTimeOffset, WorldState> worldFactory,
+        CancellationToken cancellationToken)
+    {
+        ValidateMatchId(matchId);
+        ArgumentNullException.ThrowIfNull(worldFactory);
         var now =
             await ReadDatabaseTimeAsync(
                 connection,
@@ -68,8 +81,7 @@ public sealed class PostgresMatchRepository(
             now,
             cancellationToken);
 
-        await transaction.CommitAsync(
-            cancellationToken);
+        return now;
     }
 
     /// <summary>

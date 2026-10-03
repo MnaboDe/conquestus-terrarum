@@ -18,6 +18,7 @@ public sealed class PostgresFixture : IAsyncLifetime
 {
     private readonly string _schema = "ct_test_" + Guid.NewGuid().ToString("N");
     private string? _connectionString;
+    public string ConnectionString { get; private set; } = null!;
     public NpgsqlDataSource DataSource { get; private set; } = null!;
 
     public async Task InitializeAsync()
@@ -29,7 +30,8 @@ public sealed class PostgresFixture : IAsyncLifetime
         await using var command = new NpgsqlCommand($"CREATE SCHEMA \"{_schema}\"", connection);
         await command.ExecuteNonQueryAsync();
         var builder = new NpgsqlConnectionStringBuilder(_connectionString) { SearchPath = _schema };
-        DataSource = NpgsqlDataSource.Create(builder.ConnectionString);
+        ConnectionString = builder.ConnectionString;
+        DataSource = NpgsqlDataSource.Create(ConnectionString);
         await new PostgresMigrator(DataSource).MigrateAsync();
     }
 
@@ -252,7 +254,7 @@ public sealed class PostgresIntegrationTests(PostgresFixture database) : IClassF
         await Task.WhenAll(new PostgresMigrator(database.DataSource).MigrateAsync(),
             new PostgresMigrator(database.DataSource).MigrateAsync());
         await using var command = database.DataSource.CreateCommand("SELECT count(*) FROM schema_migrations");
-        Assert.Equal(2L, await command.ExecuteScalarAsync());
+        Assert.Equal(3L, await command.ExecuteScalarAsync());
     }
 
     [PostgresFact]

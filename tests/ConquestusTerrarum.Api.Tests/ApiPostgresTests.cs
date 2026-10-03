@@ -1,11 +1,14 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Net.Http.Headers;
+using ConquestusTerrarum.Api.Sessions;
 using ConquestusTerrarum.Api.Contracts;
 using ConquestusTerrarum.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Npgsql;
 using static ConquestusTerrarum.Testing.SnapshotWorlds;
 
@@ -57,6 +60,7 @@ internal sealed class PostgresApiFactory(string connectionString) : WebApplicati
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment("Development");
+        builder.ConfigureLogging(logging => logging.ClearProviders().AddConsole());
         builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
             new Dictionary<string, string?> { ["ConnectionStrings:Postgres"] = connectionString }));
     }
@@ -91,11 +95,14 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
         Assert.Equal(initial.ServerTime, new WorldSnapshotSerializer().Deserialize(initialRow.Json).CheckpointTime);
 
         var path = $"/api/v1/matches/{initial.MatchId}";
+        var movingOwner = initial.Armies.First(a => a.LocationId == initial.Locations.Single(l => l.Name == "West camp").Id).OwnerId;
+        await Authenticate(client, initial.MatchId, movingOwner);
         var current = await State(await client.GetAsync(path));
         Assert.Equal(1, current.Version);
         var choice = (from army in current.Armies
             from connection in current.Connections
             where connection.TravelTimeTicks == TimeSpan.FromSeconds(5).Ticks &&
+                  army.OwnerId == movingOwner &&
                   (army.LocationId == connection.FromLocationId || army.LocationId == connection.ToLocationId)
             select (Army: army, Connection: connection)).First();
         var destination = choice.Army.LocationId == choice.Connection.FromLocationId
@@ -134,6 +141,7 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
         await new PostgresMatchRepository(database.DataSource).CreateAsync(id, Retreat());
         await using var factory = new PostgresApiFactory(database.ConnectionString);
         using var client = factory.CreateClient();
+        await Authenticate(client, id, Id(21));
         var response = await State(await client.PostAsync($"/api/v1/matches/{id}/armies/{Id(11)}/retreat", null));
         var army = response.Armies.Single(a => a.Id == Id(11));
         Assert.Equal(1, response.Version);
@@ -156,6 +164,7 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
         var before = await Row(id);
         await using var factory = new PostgresApiFactory(database.ConnectionString);
         using var client = factory.CreateClient();
+        await Authenticate(client, id, Id(21));
         await MatchEndpointTests.AssertProblem(
             await client.PostAsJsonAsync($"/api/v1/matches/{id}/armies/{Id(11)}/move",
                 new { destinationLocationId = Id(2) }), 409);
@@ -176,6 +185,7 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
                 databaseTime));
         await using var factory = new PostgresApiFactory(database.ConnectionString);
         using var client = factory.CreateClient();
+        await Authenticate(client, id, Id(21));
         var before = await Storage();
         decimal hp = 100000m;
         for (var attempt = 0; attempt < 3; attempt++)
@@ -204,6 +214,28 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
             return (reader.GetString(0), reader.GetInt64(1), new DateTimeOffset(reader.GetDateTime(2)),
                 reader.GetInt64(3), reader.GetString(4), reader.GetInt64(5));
         }
+    }
+
+    private async Task Authenticate(HttpClient client, Guid matchId, Guid ownerId)
+    {
+        var token = PlayerCredentials.GenerateToken();
+        await using var command = database.DataSource.CreateCommand("""
+            WITH session AS (
+                INSERT INTO match_sessions (match_id, join_code, created_at) VALUES ($1, $2, clock_timestamp())
+                RETURNING match_id
+            )
+            INSERT INTO match_players (match_id, slot, player_id, token_hash, joined_at)
+            SELECT session.match_id, player.slot, player.id, player.hash, player.joined_at
+            FROM session CROSS JOIN (VALUES (1, $3, $4, clock_timestamp()), (2, $5, NULL, NULL))
+                AS player(slot, id, hash, joined_at)
+            """);
+        command.Parameters.AddWithValue(matchId);
+        command.Parameters.AddWithValue(PlayerCredentials.GenerateJoinCode());
+        command.Parameters.AddWithValue(ownerId);
+        command.Parameters.AddWithValue(PlayerCredentials.HashToken(token));
+        command.Parameters.AddWithValue(Guid.NewGuid());
+        await command.ExecuteNonQueryAsync();
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }
 
     private async Task<(string Json, long Version, DateTimeOffset Created)> Row(Guid matchId)

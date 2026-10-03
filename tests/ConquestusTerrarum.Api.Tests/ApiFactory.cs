@@ -1,24 +1,79 @@
 using ConquestusTerrarum.Domain.World;
 using ConquestusTerrarum.Persistence;
+using ConquestusTerrarum.Api.Sessions;
+using System.Net.Http.Headers;
 using ConquestusTerrarum.Testing;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
+using Microsoft.Extensions.Logging;
 
 namespace ConquestusTerrarum.Api.Tests;
 
 internal sealed class ApiFactory(RecordingMatchRepository repository, string environment = "Development")
     : WebApplicationFactory<Program>
 {
+    public RecordingSessionRepository Sessions { get; } = new(repository);
+
+    protected override void ConfigureClient(HttpClient client)
+    {
+        base.ConfigureClient(client);
+        client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", RecordingSessionRepository.TestToken);
+    }
+
     protected override void ConfigureWebHost(IWebHostBuilder builder)
     {
         builder.UseEnvironment(environment);
+        builder.ConfigureLogging(logging => logging.ClearProviders().AddConsole());
         builder.ConfigureServices(services =>
         {
             services.RemoveAll<IMatchRepository>();
             services.AddSingleton<IMatchRepository>(repository);
+            services.RemoveAll<IMatchSessionRepository>();
+            services.AddSingleton<IMatchSessionRepository>(Sessions);
         });
+    }
+}
+
+internal sealed class RecordingSessionRepository(RecordingMatchRepository matches) : IMatchSessionRepository
+{
+    public const string TestToken = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    private MatchSessionCreation? _session;
+    private byte[]? _secondHash;
+    public int CollisionsRemaining { get; set; }
+    public int CreationAttempts { get; private set; }
+
+    public async Task CreateAsync(MatchSessionCreation session, Func<DateTimeOffset, WorldState> worldFactory,
+        CancellationToken cancellationToken = default)
+    {
+        CreationAttempts++;
+        if (CollisionsRemaining-- > 0) throw new JoinCodeCollisionException();
+        await matches.CreateAsync(session.MatchId, worldFactory, cancellationToken);
+        _session = session;
+        _secondHash = null;
+    }
+
+    public Task<MatchPlayerIdentity> JoinAsync(string joinCode, byte[] tokenHash,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (_session?.JoinCode != joinCode) throw new JoinCodeNotFoundException();
+        if (_secondHash is not null) throw new MatchFullException();
+        _secondHash = tokenHash;
+        return Task.FromResult(new MatchPlayerIdentity(_session.MatchId, _session.SecondPlayerId));
+    }
+
+    public Task<Guid?> ResolvePlayerAsync(Guid matchId, byte[] tokenHash,
+        CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (matchId != matches.MatchId) throw new MatchNotFoundException(matchId);
+        Guid? playerId = null;
+        if (_session is null && tokenHash.SequenceEqual(PlayerCredentials.HashToken(TestToken))) playerId = SnapshotWorlds.Id(21);
+        if (_session is not null && tokenHash.SequenceEqual(_session.FirstTokenHash)) playerId = _session.FirstPlayerId;
+        if (_session is not null && _secondHash is not null && tokenHash.SequenceEqual(_secondHash)) playerId = _session.SecondPlayerId;
+        return Task.FromResult(playerId);
     }
 }
 
