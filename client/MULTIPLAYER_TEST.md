@@ -1,8 +1,20 @@
 # Local two-player test
 
 Use Unity **6000.6.1f1**, the system **.NET 10** SDK, and two independent clients talking to
-`http://localhost:5108`. Sessions live only in memory. Stop/Disconnect loses that client's credential;
-an occupied slot cannot be reclaimed by entering its join code again. Use a new game for a fresh test.
+`http://localhost:5108`. One anonymous session is saved locally after successful Create/Join, before the first
+snapshot GET. Startup stays disconnected and offers **Continue Game** when a saved record exists.
+**Back to Menu** (`Disconnect()` in code) clears only the active view and keeps the save. **Forget Saved Game**
+removes the local credential permanently; it does not free the occupied server slot. Forget before creating/joining
+another game. The join code cannot recover a previously occupied slot.
+
+The MVP stores only match ID, player ID, opaque player token, and optional join code in a single versioned PlayerPrefs
+record (`ConquestusTerrarum.AnonymousSession.v1`). This is local anonymous-session persistence, **not hardened account
+credential storage**: PlayerPrefs is not encrypted and can be read by someone with access to the local profile.
+Do not share/export its contents or log tokens. `ISessionStorage` can later be replaced with Android Keystore/iOS Keychain
+storage. No hard-coded encryption, permanent account, token rotation, or platform-specific runtime API is used.
+Snapshots, movement, HP, selections, and feed cursors are never saved. PostgreSQL keeps the token hash without a client
+restart expiry. Continue reuses the original token in Authorization and loads a full snapshot, then polls after that
+snapshot's `updateCursor`.
 
 ## Backend
 
@@ -25,13 +37,15 @@ These credentials and HTTP address are for local development. No AWS services ar
 2. Open `Assets/Scenes/SampleScene.unity`. Use **Conquestus Terrarum > Build Windows Client** to build the standalone
    executable to `client/ConquestusTerrarumClient/Builds/Windows/ConquestusTerrarum.exe`. The build uses the enabled scenes
    and Windows x64 development target. The build folder is ignored by Git.
-3. Press Play in the editor for Client A. It should start **Disconnected**, with **Create Game**, a join-code field,
-   and **Join Game**, without creating any match automatically.
+3. Press Play in the editor for Client A. With no saved game it starts **Disconnected**, with **Create Game**, a join-code
+   field and **Join Game**. If a prior save exists, explicitly Forget it before this fresh-match test.
 4. Click **Create Game**. Wait for the authoritative map to load. The HUD shows the match ID, local player ID,
    and six-character join code. It never displays a player token.
 5. Click **Copy Join Code**, or read the code from the HUD.
-6. Launch the standalone executable for Client B. Alternatively launch the executable twice instead of using the editor.
-   Both standalone processes continue updating in the background; leave the editor running in Play Mode.
+6. Launch the standalone executable for Client B. Use **editor + standalone** for independent local PlayerPrefs profiles.
+   Two standalone instances of the same product share one local save and are not separate player profiles; use separate
+   OS users or an isolated verification build with distinct test stores for that case. Leave the editor in Play Mode;
+   standalone processes continue updating in the background.
 7. Enter A's code in B's join-code field and click **Join Game**. Lowercase and surrounding whitespace are accepted.
 8. Verify A and B show the **same match ID**, the same four locations, and the same army IDs/owners. Their **local player IDs differ**.
    The initial world has two armies for each player, including the second player's armies before they join.
@@ -50,7 +64,7 @@ These credentials and HTTP address are for local development. No AWS services ar
 17. Change selection while HP polling runs. The newly selected army must not receive the previous army's HP/flags.
 18. Select your own eligible army and click **Retreat Selected** while the battle is still active. Verify both clients observe
     its retreat and eventual arrival. Select an opponent army and confirm Retreat remains disabled even if it can retreat.
-19. If the battle has already finished, create a new match and repeat, or send the remaining armies from the two camps to Crossroads.
+19. If the battle has already finished, explicitly Forget and create a new match, or send the remaining armies from the camps.
 20. Use **Refresh** to compare the authoritative snapshot with the displayed map. No periodic full-refresh button use should be
     needed for movement or normal feed synchronization.
 
@@ -62,12 +76,77 @@ clicks inside the HUD are excluded from map input.
 - Enter a malformed code, then a valid-shaped unknown code: show readable errors and remain disconnected.
 - Try joining a full match from a third process: show that it already has two players, without showing a map or credentials.
 - Stop the API and try Create/Join: show a backend-unavailable message. Restart it, then retry.
-- If creation/join succeeds but the first snapshot load fails, use **Retry Load**. The issued credential remains in memory;
-  this does not claim another slot. **Disconnect** intentionally clears it and returns to Create/Join.
-- Start a refresh/command, then Disconnect and create another match. Late callbacks must not overwrite the new session,
+- If creation/join succeeds but the first snapshot load fails, use **Retry Load**. The issued credential was already saved;
+  closing/restarting and Continue also recovers it without claiming another slot. If saving itself fails, keep the client
+  open and use Retry Load to retry saving; Back to Menu refuses to drop an unsaved issued credential.
+- Start a refresh/command, then Back to Menu, Continue, or explicitly Forget and create another match. Late callbacks must not overwrite the new session,
   cursor, map, status, or selected-army details. Old polling callbacks are guarded by state generations.
 - A 401 is shown as a rejected player session, a 403 as an ownership error, and a 404 as a missing match/code.
-  Server/parser failures display sanitized messages. Response bodies and Authorization headers are never logged or shown.
+  Snapshot 401/404 errors explain that the save cannot be resumed and offer Forget; the credential is retained until that
+  explicit action. Temporary network/503/parser failures keep the save and Retry Load available. Malformed local saves
+  remain visible with an error and require explicit Forget before replacement. Storage errors are sanitized too.
+  Response bodies, local records and Authorization headers are never logged or shown.
+
+## Restart/reconnect scenarios
+
+Run each identity in its own local profile as described above. Record only the public match/player IDs, army IDs and join
+code; never record the player token. For editor restarts, stop Play, close/reopen the project, then enter Play again.
+
+A. **Creator:** Create Game, record the join code, match ID, player ID and owned army IDs. Close the client, reopen, and
+click Continue Game. Verify all recorded IDs, code and ownership agree. The map comes from a fresh server snapshot;
+Create/Join remain unavailable until explicit Forget. Have B join with the original code to show the second slot remains usable.
+
+B. **Joiner:** Join A's code, record B's match/player/owned army IDs, close and restart B, then Continue. Verify the same
+identity/control and A's unchanged identity. A repeat Join would return match-full; Continue must succeed on that full match.
+
+C. **Moving army:** Move an owned army from its camp to Crossroads, close before the five-second arrival, wait briefly,
+restart and Continue. If still moving, verify the visual position advances from the server `startedAt`/`arriveAt` anchors.
+Repeat with restart after arrival and verify the army appears at Crossroads. No saved movement or cursor should be used.
+
+D. **Battle:** Move armies from both camps to Crossroads. While the battle is active, close/restart each client and Continue.
+Select an owned battling army and observe HP decrease through the existing ~0.75 second detail polling; select an enemy
+and verify inspection still works while Move/Retreat remain blocked. Close again, let combat finish, then Continue and
+verify authoritative destroyed/surviving armies and cleared battle markers. No continuous HP feed is added.
+
+E. **Backend offline:** Save a valid session, stop the API, restart the client and Continue. Verify a retryable error and
+that Back to Menu still offers Continue. Restart the API and use Retry Load (or Continue after returning to the menu).
+Verify the same identity/owned armies. Also interrupt between successful credential issuance and initial snapshot loading:
+the isolated smoke harness below deliberately stops the API at this boundary and verifies the credential survives restart.
+
+F. **Invalid credentials/missing match:** Use only an isolated test build/profile. The smoke harness substitutes a valid-format
+fake token for its own saved credential to provoke 401, and a random match ID with the real credential to provoke 404.
+Verify the explanatory “cannot be resumed” message, retained local save and explicit Forget action. Never edit a real player's
+credential for this test and never paste a saved record into a terminal, log or source file.
+
+G. **Forget:** Save a session, click Forget Saved Game, close/restart, and verify Continue is absent and Create/Join are
+available. Removing the local save does not release the server slot. Create a fresh match when a new slot is needed.
+
+H. **Races:** Begin Continue then immediately Back to Menu; no later map/status may appear. Repeat Continue, Back, Continue;
+the newest snapshot must win. Begin Continue/Refresh then Forget and Create Game; only the new match may appear. Repeat
+while feed and selected battle detail requests are pending. Cursor, selection, HP and errors must never cross generations.
+
+## Automated built-player recovery smoke
+
+`client/verification/RecoverySmoke.cs` is verification source outside Unity Assets, so normal builds exclude it. To reproduce,
+make an **isolated** project copy under ignored `Builds`, copying Assets/Packages/ProjectSettings. Change ONLY that copy's
+company and product names to a unique verification identity (protects normal PlayerPrefs), copy `RecoverySmoke.cs` into its
+Assets, and build using the existing `MultiplayerBuild.BuildWindows` method. The creator uses the production PlayerPrefs
+store; the joiner uses a separate test key in that same isolated profile. Never ship the harness or use the normal product
+identity for these fault tests. Do not copy the harness build over the clean delivered build.
+
+With PostgreSQL migrated, the solution built, API port 5108 free, and a new empty output directory, run:
+
+```powershell
+& .\client\verification\Run-ReconnectSmoke.ps1 `
+  -PlayerPath 'C:\path\to\isolated-project\Builds\Windows\ConquestusTerrarum.exe' `
+  -OutputDirectory 'C:\path\to\ignored\Builds\ReconnectResults-new-run'
+```
+
+The runner owns/stops only its API process, deliberately creates an outage, launches real Windows player processes,
+checks same-process Retry Load and repeated process recovery, moving/active/finished battle snapshots, focused HP,
+ownership/cursor, replacement policy, stale guards, 401/404 and Forget across restart. It writes sanitized pass/fail results
+and public IDs/code only. It removes its test saves at the end of a successful run. A failed run may leave test saves;
+use another unique verification product identity for a fresh run. Runtime automation does not constitute interactive HUD testing.
 
 ## Regression and batch build
 

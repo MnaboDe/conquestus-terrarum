@@ -16,5 +16,7 @@
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ApiDtos.cs" Link="Client/ApiDtos.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/MatchUpdateApplier.cs" Link="Client/MatchUpdateApplier.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/MultiplayerSession.cs" Link="Client/MultiplayerSession.cs"/>
+        <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/SessionStorage.cs" Link="Client/SessionStorage.cs"/>
+        <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ApiFailure.cs" Link="Client/ApiFailure.cs"/>
     </ItemGroup>
 </Project>

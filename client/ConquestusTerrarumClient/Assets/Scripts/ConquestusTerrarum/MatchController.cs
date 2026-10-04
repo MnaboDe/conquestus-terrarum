@@ -14,6 +14,7 @@ namespace ConquestusTerrarum.Client
         public MultiplayerSession Session { get; private set; }
         public string LocalPlayerId => Session?.PlayerId;
         public bool IsConnected => Session != null && State != null;
+        public bool HasSavedSession { get; private set; }
         public bool IsLocalArmy(ArmyDto army) => Session != null && Session.IsLocalArmy(army);
 
         public string Status { get; private set; } =
@@ -46,6 +47,8 @@ namespace ConquestusTerrarum.Client
         }
 
         private ConquestusApiClient _api;
+        private ISessionStorage _sessionStorage;
+        private bool _sessionSaved;
 
         private DateTimeOffset _serverTimeAnchor;
         private double _realtimeAnchor;
@@ -69,6 +72,59 @@ namespace ConquestusTerrarum.Client
             {
                 _api =
                     gameObject.AddComponent<ConquestusApiClient>();
+            }
+            SetSessionStorage(new SessionStorage(new PlayerPrefsSessionRecordStore()));
+        }
+
+        // Also the replacement point for a future platform-secure credential store.
+        public void SetSessionStorage(ISessionStorage storage)
+        {
+            if (Session != null || IsBusy) throw new InvalidOperationException("Return to the menu before changing storage.");
+            _sessionStorage = storage ?? throw new ArgumentNullException(nameof(storage));
+            DetectSavedSession();
+        }
+
+        private void DetectSavedSession()
+        {
+            try
+            {
+                HasSavedSession = _sessionStorage.HasSavedSession;
+                Status = HasSavedSession ? "Saved game found. Continue or Forget Saved Game." : "Disconnected. Create or join a game.";
+            }
+            catch (Exception)
+            {
+                // Fail closed: a storage read failure must not permit accidental replacement.
+                HasSavedSession = true;
+                HandleError("Could not read local session storage. Retry Continue Game or Forget Saved Game.");
+            }
+        }
+
+        public void ContinueGame()
+        {
+            if (IsBusy || Session != null) return;
+            Disconnect();
+            MultiplayerSession saved;
+            try { saved = _sessionStorage.Load(); }
+            catch (Exception) { HandleError("Could not read the saved game. Retry or choose Forget Saved Game."); return; }
+            if (saved == null)
+            {
+                HandleError(HasSavedSession
+                    ? "The saved game data is invalid. Choose Forget Saved Game before creating or joining another game."
+                    : "No saved game is available. Create or join a game.");
+                return;
+            }
+            Connect(saved, false);
+        }
+
+        public void ForgetSavedGame()
+        {
+            // Explicit loss of the credential is allowed even while a request/save is pending.
+            ResetConnection();
+            try { _sessionStorage.Clear(); DetectSavedSession(); }
+            catch (Exception)
+            {
+                HasSavedSession = true;
+                HandleError("Could not remove the saved game. Retry Forget Saved Game.");
             }
         }
 
@@ -98,19 +154,23 @@ namespace ConquestusTerrarum.Client
         {
             if (IsBusy || Session != null)
                 return;
+            DetectSavedSession();
+            if (HasSavedSession) { HandleError("Choose Forget Saved Game before creating another game."); return; }
 
             Disconnect();
             var generation = _sessionGeneration;
             IsBusy = true;
             Status = "Creating game...";
             StartCoroutine(_api.CreateMatch(
-                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromCreate(dto)); },
+                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromCreate(dto), true); },
                 error => { if (generation == _sessionGeneration) HandleError(error); }));
         }
 
         public void JoinGame(string joinCode)
         {
             if (IsBusy || Session != null) return;
+            DetectSavedSession();
+            if (HasSavedSession) { HandleError("Choose Forget Saved Game before joining another game."); return; }
             var code = MultiplayerSession.NormalizeJoinCode(joinCode);
             if (!MultiplayerSession.ValidJoinCode(code))
             {
@@ -122,11 +182,11 @@ namespace ConquestusTerrarum.Client
             IsBusy = true;
             Status = "Joining game...";
             StartCoroutine(_api.JoinMatch(code,
-                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromJoin(dto, code)); },
+                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromJoin(dto, code), true); },
                 error => { if (generation == _sessionGeneration) HandleError(error); }));
         }
 
-        private void Connect(MultiplayerSession session)
+        private void Connect(MultiplayerSession session, bool save)
         {
             if (session == null)
             {
@@ -135,10 +195,37 @@ namespace ConquestusTerrarum.Client
             }
             Session = session;
             _api.SetSession(session);
+            _sessionSaved = !save;
+            if (!EnsureSessionSaved()) return;
             BeginRefresh("Loading authoritative match...");
         }
 
+        private bool EnsureSessionSaved()
+        {
+            if (_sessionSaved || Session == null) return true;
+            try
+            {
+                _sessionStorage.Save(Session);
+                _sessionSaved = true;
+                HasSavedSession = true;
+                return true;
+            }
+            catch (Exception)
+            {
+                HandleError("Could not save this credential locally. Keep the client open and use Retry Load to retry saving, or explicitly Forget Saved Game.");
+                return false;
+            }
+        }
+
+        // Back to Menu retains durable credentials; ForgetSavedGame is the explicit destructive action.
         public void Disconnect()
+        {
+            if (!EnsureSessionSaved()) return;
+            ResetConnection();
+            DetectSavedSession();
+        }
+
+        private void ResetConnection()
         {
             _sessionGeneration++;
             _stateGeneration++;
@@ -150,6 +237,7 @@ namespace ConquestusTerrarum.Client
             _battleDetailRequestInProgress = false;
             State = null;
             Session = null;
+            _sessionSaved = false;
             _api.SetSession(null);
             SelectedArmyId = null;
             IsBusy = false;
@@ -167,6 +255,7 @@ namespace ConquestusTerrarum.Client
             {
                 return;
             }
+            if (!EnsureSessionSaved()) return;
 
             BeginRefresh(
                 "Refreshing...");
@@ -350,7 +439,7 @@ namespace ConquestusTerrarum.Client
                 _api.GetMatch(
                     session.MatchId,
                     state => { if (IsCurrentForeground(generation, session)) ApplyState(state); },
-                    error => { if (IsCurrentForeground(generation, session)) HandleError(error); }));
+                    error => { if (IsCurrentForeground(generation, session)) HandleError(error.RecoveryMessage); }));
         }
 
         private bool IsCurrentForeground(long generation, MultiplayerSession session) =>
@@ -528,8 +617,9 @@ namespace ConquestusTerrarum.Client
         }
 
         private void HandlePollingError(
-            string error)
+            ApiFailure failure)
         {
+            var error = failure.Message;
             LastError = error;
             Status = "Update polling failed.";
 
@@ -691,8 +781,9 @@ namespace ConquestusTerrarum.Client
         }
 
         private void HandleBattleDetailError(
-            string error)
+            ApiFailure failure)
         {
+            var error = failure.Message;
             // Detail polling is supplemental. A temporary
             // failure must not destroy the displayed match state.
             Debug.LogWarning(
@@ -703,6 +794,8 @@ namespace ConquestusTerrarum.Client
         // ------------------------------------------------------------
         // General helpers
         // ------------------------------------------------------------
+
+        private void HandleError(ApiFailure error) => HandleError(error.Message);
 
         private void HandleError(
             string error)

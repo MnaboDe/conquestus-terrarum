@@ -77,10 +77,13 @@ namespace ConquestusTerrarum.Client
             {
                 GUILayout.Label($"Match: {session.MatchId}");
                 GUILayout.Label($"Local player: {_controller.LocalPlayerId}");
-                GUILayout.Label("Join code: " + session.JoinCode);
-                GUILayout.Label("Share this join code with Player 2.");
-                if (GUILayout.Button("Copy Join Code", GUILayout.Height(30)))
-                    GUIUtility.systemCopyBuffer = session.JoinCode;
+                if (!string.IsNullOrEmpty(session.JoinCode))
+                {
+                    GUILayout.Label("Join code: " + session.JoinCode);
+                    GUILayout.Label("Share this join code with Player 2.");
+                    if (GUILayout.Button("Copy Join Code", GUILayout.Height(30)))
+                        GUIUtility.systemCopyBuffer = session.JoinCode;
+                }
             }
 
             if (state != null)
@@ -197,10 +200,18 @@ namespace ConquestusTerrarum.Client
 
             if (session == null)
             {
-                if (GUILayout.Button("Create Game", GUILayout.Height(36))) _controller.CreateGame();
-                GUILayout.Label("Join code:");
-                _joinCode = GUILayout.TextField(_joinCode, 32);
-                if (GUILayout.Button("Join Game", GUILayout.Height(36))) _controller.JoinGame(_joinCode);
+                if (_controller.HasSavedSession)
+                {
+                    if (GUILayout.Button("Continue Game", GUILayout.Height(36))) _controller.ContinueGame();
+                    GUILayout.Label("Forget the saved game to create or join another. This removes your local access to its occupied slot.");
+                }
+                else
+                {
+                    if (GUILayout.Button("Create Game", GUILayout.Height(36))) _controller.CreateGame();
+                    GUILayout.Label("Join code:");
+                    _joinCode = GUILayout.TextField(_joinCode, 32);
+                    if (GUILayout.Button("Join Game", GUILayout.Height(36))) _controller.JoinGame(_joinCode);
+                }
             }
             else
             {
@@ -208,10 +219,12 @@ namespace ConquestusTerrarum.Client
                 GUI.enabled = !_controller.IsBusy && _controller.IsLocalArmy(selected) && selected.canRetreat;
                 if (GUILayout.Button("Retreat Selected", GUILayout.Height(36))) _controller.RetreatSelectedArmy();
                 GUI.enabled = true;
-                if (GUILayout.Button("Disconnect", GUILayout.Height(30))) _controller.Disconnect();
+                if (GUILayout.Button("Back to Menu", GUILayout.Height(30))) _controller.Disconnect();
             }
 
             GUI.enabled = true;
+            if (_controller.HasSavedSession || session != null)
+                if (GUILayout.Button("Forget Saved Game", GUILayout.Height(30))) _controller.ForgetSavedGame();
 
             GUILayout.Space(12);
 

@@ -13,32 +13,32 @@ namespace ConquestusTerrarum.Client
 
         public void SetSession(MultiplayerSession session) => _session = session;
 
-        public IEnumerator CreateMatch(Action<CreateMatchDto> onSuccess, Action<string> onError)
+        public IEnumerator CreateMatch(Action<CreateMatchDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(Post("/api/v1/matches"), onSuccess, onError,
                 dto => MultiplayerSession.FromCreate(dto) != null, authenticated: false);
         }
 
-        public IEnumerator JoinMatch(string joinCode, Action<JoinMatchDto> onSuccess, Action<string> onError)
+        public IEnumerator JoinMatch(string joinCode, Action<JoinMatchDto> onSuccess, Action<ApiFailure> onError)
         {
             var code = MultiplayerSession.NormalizeJoinCode(joinCode);
             yield return Send(Post("/api/v1/matches/join", new JoinMatchRequestDto { joinCode = code }),
                 onSuccess, onError, dto => MultiplayerSession.FromJoin(dto, code) != null, authenticated: false);
         }
 
-        public IEnumerator GetMatch(string matchId, Action<MatchStateDto> onSuccess, Action<string> onError)
+        public IEnumerator GetMatch(string matchId, Action<MatchStateDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}"), onSuccess, onError,
                 state => ValidState(state, matchId), matchId);
         }
 
-        public IEnumerator GetUpdates(string matchId, long after, Action<MatchUpdatesDto> onSuccess, Action<string> onError)
+        public IEnumerator GetUpdates(string matchId, long after, Action<MatchUpdatesDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}/updates?after={after}"),
                 onSuccess, onError, page => page != null && page.updates != null && page.nextCursor >= 0, matchId);
         }
 
-        public IEnumerator GetArmyDetails(string matchId, string armyId, Action<ArmyDetailsDto> onSuccess, Action<string> onError)
+        public IEnumerator GetArmyDetails(string matchId, string armyId, Action<ArmyDetailsDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/details"),
                 onSuccess, onError, details => details != null && details.units != null &&
@@ -47,14 +47,14 @@ namespace ConquestusTerrarum.Client
         }
 
         public IEnumerator MoveArmy(string matchId, string armyId, string destinationLocationId,
-            Action<MatchStateDto> onSuccess, Action<string> onError)
+            Action<MatchStateDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(Post($"/api/v1/matches/{matchId}/armies/{armyId}/move",
                     new MoveArmyRequestDto { destinationLocationId = destinationLocationId }),
                 onSuccess, onError, state => ValidState(state, matchId), matchId);
         }
 
-        public IEnumerator RetreatArmy(string matchId, string armyId, Action<MatchStateDto> onSuccess, Action<string> onError)
+        public IEnumerator RetreatArmy(string matchId, string armyId, Action<MatchStateDto> onSuccess, Action<ApiFailure> onError)
         {
             yield return Send(Post($"/api/v1/matches/{matchId}/armies/{armyId}/retreat"),
                 onSuccess, onError, state => ValidState(state, matchId), matchId);
@@ -72,7 +72,7 @@ namespace ConquestusTerrarum.Client
             return request;
         }
 
-        private IEnumerator Send<T>(UnityWebRequest request, Action<T> onSuccess, Action<string> onError,
+        private IEnumerator Send<T>(UnityWebRequest request, Action<T> onSuccess, Action<ApiFailure> onError,
             Func<T, bool> validate, string matchId = null, bool authenticated = true) where T : class
         {
             using (request)
@@ -83,7 +83,7 @@ namespace ConquestusTerrarum.Client
                 {
                     if (session == null || !session.Matches(matchId))
                     {
-                        onError?.Invoke("Connect to this match before requesting game state.");
+                        onError?.Invoke(new ApiFailure(0, "Connect to this match before requesting game state."));
                         yield break;
                     }
                     request.SetRequestHeader("Authorization", "Bearer " + session.PlayerToken);
@@ -93,7 +93,7 @@ namespace ConquestusTerrarum.Client
                 var body = request.downloadHandler?.text ?? "";
                 if (request.result != UnityWebRequest.Result.Success)
                 {
-                    onError?.Invoke(ReadError(request.responseCode, body));
+                    onError?.Invoke(new ApiFailure(request.responseCode, ReadError(request.responseCode, body)));
                     yield break;
                 }
 
@@ -108,7 +108,7 @@ namespace ConquestusTerrarum.Client
                     // Parser messages may contain response data, including create/join credentials.
                     response = null;
                 }
-                if (response == null) onError?.Invoke("The server returned an invalid response. Try again or check the API version.");
+                if (response == null) onError?.Invoke(new ApiFailure(0, "The server returned an invalid response. Try again or check the API version."));
                 else onSuccess?.Invoke(response);
             }
         }
@@ -129,7 +129,7 @@ namespace ConquestusTerrarum.Client
             {
                 case "join_code_not_found": return "Join code not found. Check the code and try again.";
                 case "match_full": return "This match already has two players. Create or join another game.";
-                case "invalid_player_token": return "Your player session was rejected (401). Disconnect and create or join a game.";
+                case "invalid_player_token": return "Your player session was rejected (401). Return to the menu to retry or forget the saved game.";
                 case "army_not_owned": return "You can only command your own armies (403).";
                 case "match_not_found": return "This match no longer exists (404).";
             }
@@ -137,7 +137,7 @@ namespace ConquestusTerrarum.Client
             {
                 case 0: return "Cannot reach the backend at " + BaseUrl + ". Check that the API is running.";
                 case 400: return "The request is invalid. Check the join code or selected command.";
-                case 401: return "Your player session was rejected (401). Disconnect and create or join a game.";
+                case 401: return "Your player session was rejected (401). Return to the menu to retry or forget the saved game.";
                 case 403: return "You can only command your own armies (403).";
                 case 404: return "The requested match or join code was not found (404).";
                 case 409: return "The command conflicts with the current game state. Refresh and try again.";

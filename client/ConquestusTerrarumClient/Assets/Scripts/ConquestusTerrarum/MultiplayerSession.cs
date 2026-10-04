@@ -4,7 +4,7 @@ using System.Linq;
 
 namespace ConquestusTerrarum.Client
 {
-    // Credentials belong to the connection, never to a simulation DTO or persistent client settings.
+    // Credentials belong to the connection and its local recovery store, never to simulation DTOs.
     public sealed class MultiplayerSession
     {
         public string MatchId { get; }
@@ -32,6 +32,13 @@ namespace ConquestusTerrarum.Client
             if (dto == null || !ValidCredentials(dto.matchId, dto.playerId, dto.playerToken) ||
                 !ValidJoinCode(joinCode)) return null;
             return new MultiplayerSession(dto.matchId, dto.playerId, dto.playerToken, joinCode);
+        }
+
+        public static MultiplayerSession Restore(string matchId, string playerId, string token, string joinCode)
+        {
+            if (!ValidCredentials(matchId, playerId, token) ||
+                !string.IsNullOrEmpty(joinCode) && !ValidJoinCode(joinCode)) return null;
+            return new MultiplayerSession(matchId, playerId, token, joinCode ?? "");
         }
 
         public bool IsLocalArmy(ArmyDto army) => army != null &&
