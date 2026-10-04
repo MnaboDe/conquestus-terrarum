@@ -48,7 +48,8 @@ Do not log credentials or Authorization headers. Join codes grant the open secon
 `POST /api/v1/dev/matches` and OpenAPI remain Development-only (404 elsewhere). Development creation retains its original
 full-snapshot response and three-owner demo world, without issuing session credentials. Use production creation for
 authenticated multiplayer; existing tests can seed sidecar credentials for development/import worlds. All production
-match routes require authentication, including in Development. Unity's Create/Join and credential flow is the next milestone.
+match routes require authentication, including in Development. Unity's Create/Join flow now uses these production routes;
+see the [two-client test guide](../../client/MULTIPLAYER_TEST.md).
 
 Move armies from both camps to Crossroads, then retreat after combat starts. Run this whole block together so the battle
 is still active when retreat is requested:
@@ -135,7 +136,7 @@ Without the test connection string, PostgreSQL tests are skipped. Enabled tests 
 disposable local database with schema creation rights. Normal API tests replace the repository and exercise real
 routing, validation, mapping and domain commands without PostgreSQL.
 
-Player-specific visibility, command idempotency/retry policy, transport deployment and Unity's credential flow
+Player-specific visibility, command idempotency/retry policy and transport deployment
 remain later work. The existing cursor-based updates route and focused army-details polling are preserved;
 continuous HP does not generate global feed entries or force detail-poll snapshot writes. There is no background simulation
 or push service. A connection failure during

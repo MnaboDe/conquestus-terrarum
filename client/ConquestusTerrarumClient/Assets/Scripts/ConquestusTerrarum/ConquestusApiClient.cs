@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections;
 using System.Text;
 using UnityEngine;
@@ -9,318 +9,139 @@ namespace ConquestusTerrarum.Client
     public sealed class ConquestusApiClient : MonoBehaviour
     {
         public const string BaseUrl = "http://localhost:5108";
+        private MultiplayerSession _session;
 
-        public IEnumerator CreateDevelopmentMatch(
-            Action<MatchStateDto> onSuccess,
-            Action<string> onError)
+        public void SetSession(MultiplayerSession session) => _session = session;
+
+        public IEnumerator CreateMatch(Action<CreateMatchDto> onSuccess, Action<string> onError)
         {
-            var request = new UnityWebRequest(
-                $"{BaseUrl}/api/v1/dev/matches",
-                UnityWebRequest.kHttpVerbPOST);
+            yield return Send(Post("/api/v1/matches"), onSuccess, onError,
+                dto => MultiplayerSession.FromCreate(dto) != null, authenticated: false);
+        }
 
+        public IEnumerator JoinMatch(string joinCode, Action<JoinMatchDto> onSuccess, Action<string> onError)
+        {
+            var code = MultiplayerSession.NormalizeJoinCode(joinCode);
+            yield return Send(Post("/api/v1/matches/join", new JoinMatchRequestDto { joinCode = code }),
+                onSuccess, onError, dto => MultiplayerSession.FromJoin(dto, code) != null, authenticated: false);
+        }
+
+        public IEnumerator GetMatch(string matchId, Action<MatchStateDto> onSuccess, Action<string> onError)
+        {
+            yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}"), onSuccess, onError,
+                state => ValidState(state, matchId), matchId);
+        }
+
+        public IEnumerator GetUpdates(string matchId, long after, Action<MatchUpdatesDto> onSuccess, Action<string> onError)
+        {
+            yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}/updates?after={after}"),
+                onSuccess, onError, page => page != null && page.updates != null && page.nextCursor >= 0, matchId);
+        }
+
+        public IEnumerator GetArmyDetails(string matchId, string armyId, Action<ArmyDetailsDto> onSuccess, Action<string> onError)
+        {
+            yield return Send(UnityWebRequest.Get($"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/details"),
+                onSuccess, onError, details => details != null && details.units != null &&
+                    string.Equals(details.armyId, armyId, StringComparison.OrdinalIgnoreCase) &&
+                    DateTimeOffset.TryParse(details.serverTime, out _), matchId);
+        }
+
+        public IEnumerator MoveArmy(string matchId, string armyId, string destinationLocationId,
+            Action<MatchStateDto> onSuccess, Action<string> onError)
+        {
+            yield return Send(Post($"/api/v1/matches/{matchId}/armies/{armyId}/move",
+                    new MoveArmyRequestDto { destinationLocationId = destinationLocationId }),
+                onSuccess, onError, state => ValidState(state, matchId), matchId);
+        }
+
+        public IEnumerator RetreatArmy(string matchId, string armyId, Action<MatchStateDto> onSuccess, Action<string> onError)
+        {
+            yield return Send(Post($"/api/v1/matches/{matchId}/armies/{armyId}/retreat"),
+                onSuccess, onError, state => ValidState(state, matchId), matchId);
+        }
+
+        private static UnityWebRequest Post(string path, object body = null)
+        {
+            var request = new UnityWebRequest(BaseUrl + path, UnityWebRequest.kHttpVerbPOST);
             request.downloadHandler = new DownloadHandlerBuffer();
-
-            yield return Send(request, onSuccess, onError);
-        }
-
-        public IEnumerator GetMatch(
-            string matchId,
-            Action<MatchStateDto> onSuccess,
-            Action<string> onError)
-        {
-            var request = UnityWebRequest.Get(
-                $"{BaseUrl}/api/v1/matches/{matchId}");
-
-            yield return Send(request, onSuccess, onError);
-        }
-
-        public IEnumerator GetUpdates(
-            string matchId,
-            long after,
-            Action<MatchUpdatesDto> onSuccess,
-            Action<string> onError)
-        {
-            var request = UnityWebRequest.Get(
-                $"{BaseUrl}/api/v1/matches/{matchId}/updates?after={after}");
-
-            request.timeout = 10;
-
-            using (request)
+            if (body != null)
             {
-                yield return request.SendWebRequest();
-
-                var body =
-                    request.downloadHandler?.text ?? "";
-
-                if (request.result ==
-                    UnityWebRequest.Result.Success)
-                {
-                    try
-                    {
-                        var updates =
-                            JsonUtility.FromJson<MatchUpdatesDto>(
-                                body);
-
-                        if (updates == null)
-                        {
-                            onError?.Invoke(
-                                "API returned invalid updates JSON.");
-
-                            yield break;
-                        }
-
-                        onSuccess?.Invoke(
-                            updates);
-                    }
-                    catch (Exception exception)
-                    {
-                        onError?.Invoke(
-                            $"Updates JSON error: {exception.Message}");
-                    }
-
-                    yield break;
-                }
-
-                var error =
-                    $"HTTP {request.responseCode}: {request.error}";
-
-                if (!string.IsNullOrWhiteSpace(body))
-                {
-                    try
-                    {
-                        var problem =
-                            JsonUtility.FromJson<ProblemDetailsDto>(
-                                body);
-
-                        if (problem != null)
-                        {
-                            if (!string.IsNullOrWhiteSpace(
-                                    problem.code))
-                            {
-                                error +=
-                                    $" [{problem.code}]";
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(
-                                    problem.detail))
-                            {
-                                error +=
-                                    $" {problem.detail}";
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Keep generic HTTP error.
-                    }
-                }
-
-                onError?.Invoke(
-                    error);
+                request.uploadHandler = new UploadHandlerRaw(Encoding.UTF8.GetBytes(JsonUtility.ToJson(body)));
+                request.SetRequestHeader("Content-Type", "application/json");
             }
+            return request;
         }
 
-        public IEnumerator GetArmyDetails(
-            string matchId,
-            string armyId,
-            Action<ArmyDetailsDto> onSuccess,
-            Action<string> onError)
+        private IEnumerator Send<T>(UnityWebRequest request, Action<T> onSuccess, Action<string> onError,
+            Func<T, bool> validate, string matchId = null, bool authenticated = true) where T : class
         {
-            var request =
-                UnityWebRequest.Get(
-                    $"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/details");
-
-            request.timeout = 10;
-
             using (request)
             {
-                yield return request.SendWebRequest();
-
-                var body =
-                    request.downloadHandler?.text ?? "";
-
-                if (request.result ==
-                    UnityWebRequest.Result.Success)
+                // Capture credentials once per request. Session changes cannot retarget in-flight requests.
+                var session = _session;
+                if (authenticated)
                 {
-                    try
+                    if (session == null || !session.Matches(matchId))
                     {
-                        var details =
-                            JsonUtility.FromJson<ArmyDetailsDto>(
-                                body);
-
-                        if (details == null ||
-                            string.IsNullOrWhiteSpace(
-                                details.armyId))
-                        {
-                            onError?.Invoke(
-                                "API returned invalid army details JSON.");
-
-                            yield break;
-                        }
-
-                        onSuccess?.Invoke(
-                            details);
+                        onError?.Invoke("Connect to this match before requesting game state.");
+                        yield break;
                     }
-                    catch (Exception exception)
-                    {
-                        onError?.Invoke(
-                            $"Army details JSON error: {exception.Message}");
-                    }
-
-                    yield break;
+                    request.SetRequestHeader("Authorization", "Bearer " + session.PlayerToken);
                 }
-
-                var error =
-                    $"HTTP {request.responseCode}: {request.error}";
-
-                if (!string.IsNullOrWhiteSpace(body))
-                {
-                    try
-                    {
-                        var problem =
-                            JsonUtility.FromJson<ProblemDetailsDto>(
-                                body);
-
-                        if (problem != null)
-                        {
-                            if (!string.IsNullOrWhiteSpace(
-                                    problem.code))
-                            {
-                                error +=
-                                    $" [{problem.code}]";
-                            }
-
-                            if (!string.IsNullOrWhiteSpace(
-                                    problem.detail))
-                            {
-                                error +=
-                                    $" {problem.detail}";
-                            }
-                        }
-                    }
-                    catch
-                    {
-                        // Keep generic HTTP error.
-                    }
-                }
-
-                onError?.Invoke(
-                    error);
-            }
-        }
-
-        public IEnumerator MoveArmy(
-            string matchId,
-            string armyId,
-            string destinationLocationId,
-            Action<MatchStateDto> onSuccess,
-            Action<string> onError)
-        {
-            var body = new MoveArmyRequestDto
-            {
-                destinationLocationId = destinationLocationId
-            };
-
-            var json = JsonUtility.ToJson(body);
-
-            var request = new UnityWebRequest(
-                $"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/move",
-                UnityWebRequest.kHttpVerbPOST);
-
-            request.uploadHandler =
-                new UploadHandlerRaw(Encoding.UTF8.GetBytes(json));
-
-            request.downloadHandler = new DownloadHandlerBuffer();
-
-            request.SetRequestHeader(
-                "Content-Type",
-                "application/json");
-
-            yield return Send(request, onSuccess, onError);
-        }
-
-        public IEnumerator RetreatArmy(
-            string matchId,
-            string armyId,
-            Action<MatchStateDto> onSuccess,
-            Action<string> onError)
-        {
-            var request = new UnityWebRequest(
-                $"{BaseUrl}/api/v1/matches/{matchId}/armies/{armyId}/retreat",
-                UnityWebRequest.kHttpVerbPOST);
-
-            request.downloadHandler = new DownloadHandlerBuffer();
-
-            yield return Send(request, onSuccess, onError);
-        }
-
-        private static IEnumerator Send(
-            UnityWebRequest request,
-            Action<MatchStateDto> onSuccess,
-            Action<string> onError)
-        {
-            request.timeout = 10;
-
-            using (request)
-            {
+                request.timeout = 10;
                 yield return request.SendWebRequest();
-
                 var body = request.downloadHandler?.text ?? "";
-
-                if (request.result == UnityWebRequest.Result.Success)
+                if (request.result != UnityWebRequest.Result.Success)
                 {
-                    try
-                    {
-                        var state =
-                            JsonUtility.FromJson<MatchStateDto>(body);
-
-                        if (state == null ||
-                            string.IsNullOrWhiteSpace(state.matchId))
-                        {
-                            onError?.Invoke(
-                                "API returned invalid match JSON.");
-
-                            yield break;
-                        }
-
-                        onSuccess?.Invoke(state);
-                    }
-                    catch (Exception exception)
-                    {
-                        onError?.Invoke(
-                            $"JSON error: {exception.Message}");
-                    }
-
+                    onError?.Invoke(ReadError(request.responseCode, body));
                     yield break;
                 }
 
-                var error =
-                    $"HTTP {request.responseCode}: {request.error}";
-
-                if (!string.IsNullOrWhiteSpace(body))
+                T response;
+                try
                 {
-                    try
-                    {
-                        var problem =
-                            JsonUtility.FromJson<ProblemDetailsDto>(
-                                body);
-
-                        if (problem != null)
-                        {
-                            if (!string.IsNullOrWhiteSpace(problem.code))
-                                error += $" [{problem.code}]";
-
-                            if (!string.IsNullOrWhiteSpace(problem.detail))
-                                error += $" {problem.detail}";
-                        }
-                    }
-                    catch
-                    {
-                        // Keep the generic HTTP error.
-                    }
+                    response = JsonUtility.FromJson<T>(body);
+                    if (!validate(response)) response = null;
                 }
+                catch (Exception)
+                {
+                    // Parser messages may contain response data, including create/join credentials.
+                    response = null;
+                }
+                if (response == null) onError?.Invoke("The server returned an invalid response. Try again or check the API version.");
+                else onSuccess?.Invoke(response);
+            }
+        }
 
-                onError?.Invoke(error);
+        private static bool ValidState(MatchStateDto state, string matchId) => state != null &&
+            string.Equals(state.matchId, matchId, StringComparison.OrdinalIgnoreCase) &&
+            state.locations != null && state.connections != null && state.armies != null &&
+            state.alliances != null && state.activeBattles != null && state.updateCursor >= 0 &&
+            DateTimeOffset.TryParse(state.serverTime, out _);
+
+        private static string ReadError(long status, string body)
+        {
+            ProblemDetailsDto problem = null;
+            try { problem = JsonUtility.FromJson<ProblemDetailsDto>(body); }
+            catch (Exception) { }
+            // Display known errors only; never expose arbitrary bodies, credentials, SQL, or stack traces.
+            switch (problem?.code)
+            {
+                case "join_code_not_found": return "Join code not found. Check the code and try again.";
+                case "match_full": return "This match already has two players. Create or join another game.";
+                case "invalid_player_token": return "Your player session was rejected (401). Disconnect and create or join a game.";
+                case "army_not_owned": return "You can only command your own armies (403).";
+                case "match_not_found": return "This match no longer exists (404).";
+            }
+            switch (status)
+            {
+                case 0: return "Cannot reach the backend at " + BaseUrl + ". Check that the API is running.";
+                case 400: return "The request is invalid. Check the join code or selected command.";
+                case 401: return "Your player session was rejected (401). Disconnect and create or join a game.";
+                case 403: return "You can only command your own armies (403).";
+                case 404: return "The requested match or join code was not found (404).";
+                case 409: return "The command conflicts with the current game state. Refresh and try again.";
+                default: return "The backend could not complete the request (HTTP " + status + "). Try again shortly.";
             }
         }
     }

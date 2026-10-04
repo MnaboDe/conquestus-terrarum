@@ -3,6 +3,29 @@ using System;
 namespace ConquestusTerrarum.Client
 {
     [Serializable]
+    public class CreateMatchDto
+    {
+        public string matchId;
+        public string playerId;
+        public string playerToken;
+        public string joinCode;
+    }
+
+    [Serializable]
+    public class JoinMatchDto
+    {
+        public string matchId;
+        public string playerId;
+        public string playerToken;
+    }
+
+    [Serializable]
+    public class JoinMatchRequestDto
+    {
+        public string joinCode;
+    }
+
+    [Serializable]
     public class MatchStateDto
     {
         public string matchId;

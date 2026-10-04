@@ -32,8 +32,20 @@ namespace ConquestusTerrarum.Client
 
         private void Update()
         {
-            if (_controller == null || _controller.State == null)
+            if (_controller == null)
                 return;
+
+            ConfigureViewport(Camera.main);
+
+            if (_controller.State == null)
+            {
+                if (_mapRoot != null) Destroy(_mapRoot);
+                _mapRoot = null;
+                _presentedState = null;
+                _armyObjects.Clear();
+                _locationPositions.Clear();
+                return;
+            }
 
             if (!ReferenceEquals(_presentedState, _controller.State))
             {
@@ -758,13 +770,22 @@ namespace ConquestusTerrarum.Client
                 return;
 
             camera.orthographic = true;
-            camera.orthographicSize = 6.5f;
+            ConfigureViewport(camera);
 
             camera.transform.position =
                 new Vector3(
                     2.5f,
                     0f,
                     -10f);
+        }
+
+        private static void ConfigureViewport(Camera camera)
+        {
+            if (camera == null || Screen.width <= 0 || Screen.height <= 0) return;
+            // Keep every location reachable beside the HUD, including after resizing a standalone window.
+            var left = Mathf.Clamp01((DebugHud.PanelRect.xMax + 15) / Screen.width);
+            camera.rect = new Rect(left, 0, 1 - left, 1);
+            camera.orthographicSize = Mathf.Max(6.5f, 5.2f / camera.aspect);
         }
     }
 }

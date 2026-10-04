@@ -11,9 +11,13 @@ namespace ConquestusTerrarum.Client
         private const float BattleDetailPollIntervalSeconds = 0.75f;
 
         public MatchStateDto State { get; private set; }
+        public MultiplayerSession Session { get; private set; }
+        public string LocalPlayerId => Session?.PlayerId;
+        public bool IsConnected => Session != null && State != null;
+        public bool IsLocalArmy(ArmyDto army) => Session != null && Session.IsLocalArmy(army);
 
         public string Status { get; private set; } =
-            "Starting...";
+            "Disconnected. Create or join a game.";
 
         public string LastError { get; private set; }
 
@@ -53,6 +57,7 @@ namespace ConquestusTerrarum.Client
         private Coroutine _battleDetailPolling;
         private bool _battleDetailRequestInProgress;
         private long _stateGeneration;
+        private long _sessionGeneration;
         private bool _requiresFullRefresh;
 
         private void Awake()
@@ -65,11 +70,6 @@ namespace ConquestusTerrarum.Client
                 _api =
                     gameObject.AddComponent<ConquestusApiClient>();
             }
-        }
-
-        private void Start()
-        {
-            CreateDemoMatch();
         }
 
         private void OnDestroy()
@@ -94,29 +94,67 @@ namespace ConquestusTerrarum.Client
             }
         }
 
-        public void CreateDemoMatch()
+        public void CreateGame()
         {
-            if (IsBusy)
+            if (IsBusy || Session != null)
                 return;
 
-            _requiresFullRefresh = false;
+            Disconnect();
+            var generation = _sessionGeneration;
+            IsBusy = true;
+            Status = "Creating game...";
+            StartCoroutine(_api.CreateMatch(
+                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromCreate(dto)); },
+                error => { if (generation == _sessionGeneration) HandleError(error); }));
+        }
+
+        public void JoinGame(string joinCode)
+        {
+            if (IsBusy || Session != null) return;
+            var code = MultiplayerSession.NormalizeJoinCode(joinCode);
+            if (!MultiplayerSession.ValidJoinCode(code))
+            {
+                HandleError("Enter a six-character join code, using the letters and digits shown by Player 1.");
+                return;
+            }
+            Disconnect();
+            var generation = _sessionGeneration;
+            IsBusy = true;
+            Status = "Joining game...";
+            StartCoroutine(_api.JoinMatch(code,
+                dto => { if (generation == _sessionGeneration) Connect(MultiplayerSession.FromJoin(dto, code)); },
+                error => { if (generation == _sessionGeneration) HandleError(error); }));
+        }
+
+        private void Connect(MultiplayerSession session)
+        {
+            if (session == null)
+            {
+                HandleError("The server returned invalid session credentials.");
+                return;
+            }
+            Session = session;
+            _api.SetSession(session);
+            BeginRefresh("Loading authoritative match...");
+        }
+
+        public void Disconnect()
+        {
+            _sessionGeneration++;
+            _stateGeneration++;
             StopUpdatePolling();
             StopBattleDetailPolling();
-
+            _requiresFullRefresh = false;
             _updateCursor = 0;
             _pollRequestInProgress = false;
             _battleDetailRequestInProgress = false;
-
-            _stateGeneration++;
-            IsBusy = true;
+            State = null;
+            Session = null;
+            _api.SetSession(null);
             SelectedArmyId = null;
+            IsBusy = false;
             LastError = null;
-            Status = "Creating demo match...";
-
-            StartCoroutine(
-                _api.CreateDevelopmentMatch(
-                    ApplyState,
-                    HandleError));
+            Status = "Disconnected. Create or join a game.";
         }
 
         /// <summary>
@@ -125,10 +163,7 @@ namespace ConquestusTerrarum.Client
         /// </summary>
         public void Refresh()
         {
-            if (IsBusy ||
-                State == null ||
-                string.IsNullOrWhiteSpace(
-                    State.matchId))
+            if (IsBusy || Session == null)
             {
                 return;
             }
@@ -183,6 +218,12 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
+            if (!IsLocalArmy(army))
+            {
+                Status = "Opponent army selected for inspection. Only your armies can move.";
+                return;
+            }
+
             if (army.isDestroyed)
             {
                 Status =
@@ -224,7 +265,7 @@ namespace ConquestusTerrarum.Client
                 return;
             }
 
-            if (!IsConnected(
+            if (!HasConnection(
                     army.locationId,
                     locationId))
             {
@@ -247,22 +288,23 @@ namespace ConquestusTerrarum.Client
                 SelectedArmy;
 
             if (army == null ||
-                !army.canRetreat)
+                !IsLocalArmy(army) || !army.canRetreat)
             {
                 return;
             }
 
-            _stateGeneration++;
+            var generation = ++_stateGeneration;
+            var session = Session;
             IsBusy = true;
             LastError = null;
             Status = "Retreating...";
 
             StartCoroutine(
                 _api.RetreatArmy(
-                    State.matchId,
+                    session.MatchId,
                     army.id,
-                    ApplyState,
-                    HandleError));
+                    state => { if (IsCurrentForeground(generation, session)) ApplyState(state); },
+                    error => { if (IsCurrentForeground(generation, session)) HandleError(error); }));
         }
 
         private void MoveSelectedArmy(
@@ -271,10 +313,11 @@ namespace ConquestusTerrarum.Client
             ArmyDto army =
                 SelectedArmy;
 
-            if (army == null)
+            if (army == null || !IsLocalArmy(army))
                 return;
 
-            _stateGeneration++;
+            var generation = ++_stateGeneration;
+            var session = Session;
             IsBusy = true;
             LastError = null;
             Status =
@@ -282,39 +325,41 @@ namespace ConquestusTerrarum.Client
 
             StartCoroutine(
                 _api.MoveArmy(
-                    State.matchId,
+                    session.MatchId,
                     army.id,
                     destinationLocationId,
-                    ApplyState,
-                    HandleError));
+                    state => { if (IsCurrentForeground(generation, session)) ApplyState(state); },
+                    error => { if (IsCurrentForeground(generation, session)) HandleError(error); }));
         }
 
         private void BeginRefresh(
             string status)
         {
-            if (State == null ||
-                string.IsNullOrWhiteSpace(
-                    State.matchId))
+            if (Session == null)
             {
                 return;
             }
 
-            _stateGeneration++;
+            var generation = ++_stateGeneration;
+            var session = Session;
             IsBusy = true;
             LastError = null;
             Status = status;
 
             StartCoroutine(
                 _api.GetMatch(
-                    State.matchId,
-                    ApplyState,
-                    HandleError));
+                    session.MatchId,
+                    state => { if (IsCurrentForeground(generation, session)) ApplyState(state); },
+                    error => { if (IsCurrentForeground(generation, session)) HandleError(error); }));
         }
+
+        private bool IsCurrentForeground(long generation, MultiplayerSession session) =>
+            generation == _stateGeneration && ReferenceEquals(Session, session);
 
         private void ApplyState(
             MatchStateDto state)
         {
-            if (state == null)
+            if (state == null || Session == null || !Session.Matches(state.matchId))
                 return;
 
             _stateGeneration++;
@@ -670,7 +715,7 @@ namespace ConquestusTerrarum.Client
                 error);
         }
 
-        private bool IsConnected(
+        private bool HasConnection(
             string firstLocationId,
             string secondLocationId)
         {

@@ -15,5 +15,6 @@
         <Compile Include="../ConquestusTerrarum.Domain.Tests/SnapshotWorlds.cs" Link="SnapshotWorlds.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ApiDtos.cs" Link="Client/ApiDtos.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/MatchUpdateApplier.cs" Link="Client/MatchUpdateApplier.cs"/>
+        <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/MultiplayerSession.cs" Link="Client/MultiplayerSession.cs"/>
     </ItemGroup>
 </Project>

@@ -14,7 +14,7 @@ namespace ConquestusTerrarum.Client
 
         private void Update()
         {
-            if (_controller == null || _controller.IsBusy)
+            if (_controller == null || !_controller.IsConnected || _controller.IsBusy)
                 return;
 
             Vector2? screenPosition = null;
@@ -33,6 +33,10 @@ namespace ConquestusTerrarum.Client
 
             if (screenPosition == null)
                 return;
+
+            // IMGUI uses a top-left origin. HUD interaction must not also command the map behind it.
+            var guiPosition = new Vector2(screenPosition.Value.x, Screen.height - screenPosition.Value.y);
+            if (DebugHud.PanelRect.Contains(guiPosition)) return;
 
             var camera = Camera.main;
 

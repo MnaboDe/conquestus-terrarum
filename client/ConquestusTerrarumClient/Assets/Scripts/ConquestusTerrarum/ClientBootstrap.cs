@@ -11,7 +11,7 @@ namespace ConquestusTerrarum.Client
         private static void Initialize()
         {
             if (UnityEngine.Object
-                    .FindFirstObjectByType<MatchController>() != null)
+                    .FindAnyObjectByType<MatchController>() != null)
             {
                 return;
             }
@@ -33,6 +33,9 @@ namespace ConquestusTerrarum.Client
     public sealed class DebugHud : MonoBehaviour
     {
         private MatchController _controller;
+        private string _joinCode = "";
+        private Vector2 _scrollPosition;
+        public static Rect PanelRect => new Rect(15, 15, Mathf.Min(420, Screen.width * 0.35f), Mathf.Min(800, Screen.height - 30));
 
         private void Awake()
         {
@@ -46,12 +49,9 @@ namespace ConquestusTerrarum.Client
                 return;
 
             GUILayout.BeginArea(
-                new Rect(
-                    15,
-                    15,
-                    600,
-                    800),
+                PanelRect,
                 GUI.skin.box);
+            _scrollPosition = GUILayout.BeginScrollView(_scrollPosition);
 
             GUIStyle titleStyle =
                 new GUIStyle(
@@ -72,11 +72,19 @@ namespace ConquestusTerrarum.Client
             MatchStateDto state =
                 _controller.State;
 
+            var session = _controller.Session;
+            if (session != null)
+            {
+                GUILayout.Label($"Match: {session.MatchId}");
+                GUILayout.Label($"Local player: {_controller.LocalPlayerId}");
+                GUILayout.Label("Join code: " + session.JoinCode);
+                GUILayout.Label("Share this join code with Player 2.");
+                if (GUILayout.Button("Copy Join Code", GUILayout.Height(30)))
+                    GUIUtility.systemCopyBuffer = session.JoinCode;
+            }
+
             if (state != null)
             {
-                GUILayout.Label(
-                    $"Match: {state.matchId}");
-
                 GUILayout.Label(
                     $"Version: {state.version}");
 
@@ -109,6 +117,7 @@ namespace ConquestusTerrarum.Client
 
                 GUILayout.Label(
                     $"Owner: {ShortId(selected.ownerId)}");
+                GUILayout.Label(_controller.IsLocalArmy(selected) ? "YOUR ARMY" : "OPPONENT ARMY — inspection only");
 
                 GUILayout.Label(
                     $"Moving: {selected.isMoving}");
@@ -186,34 +195,20 @@ namespace ConquestusTerrarum.Client
             GUI.enabled =
                 !_controller.IsBusy;
 
-            if (GUILayout.Button(
-                    "New Demo Match",
-                    GUILayout.Height(36)))
+            if (session == null)
             {
-                _controller.CreateDemoMatch();
+                if (GUILayout.Button("Create Game", GUILayout.Height(36))) _controller.CreateGame();
+                GUILayout.Label("Join code:");
+                _joinCode = GUILayout.TextField(_joinCode, 32);
+                if (GUILayout.Button("Join Game", GUILayout.Height(36))) _controller.JoinGame(_joinCode);
             }
-
-            GUI.enabled =
-                !_controller.IsBusy &&
-                _controller.State != null;
-
-            if (GUILayout.Button(
-                    "Refresh",
-                    GUILayout.Height(36)))
+            else
             {
-                _controller.Refresh();
-            }
-
-            GUI.enabled =
-                !_controller.IsBusy &&
-                _controller.SelectedArmy != null &&
-                _controller.SelectedArmy.canRetreat;
-
-            if (GUILayout.Button(
-                    "Retreat Selected",
-                    GUILayout.Height(36)))
-            {
-                _controller.RetreatSelectedArmy();
+                if (GUILayout.Button(state == null ? "Retry Load" : "Refresh", GUILayout.Height(36))) _controller.Refresh();
+                GUI.enabled = !_controller.IsBusy && _controller.IsLocalArmy(selected) && selected.canRetreat;
+                if (GUILayout.Button("Retreat Selected", GUILayout.Height(36))) _controller.RetreatSelectedArmy();
+                GUI.enabled = true;
+                if (GUILayout.Button("Disconnect", GUILayout.Height(30))) _controller.Disconnect();
             }
 
             GUI.enabled = true;
@@ -237,43 +232,19 @@ namespace ConquestusTerrarum.Client
 
             GUILayout.Space(12);
 
-            GUILayout.Label(
-                "<b>Relation colors after selection</b>",
-                titleStyle);
+            if (state != null)
+            {
+                GUILayout.Label("<b>Relation colors after selection</b>", titleStyle);
+                DrawLegendLine("SELECTED", new Color(1f, 0.85f, 0.15f));
+                DrawLegendLine("SAME OWNER", new Color(0.25f, 0.75f, 1f));
+                DrawLegendLine("ALLY", new Color(0.25f, 0.95f, 0.4f));
+                DrawLegendLine("HOSTILE", new Color(1f, 0.25f, 0.25f));
+                GUILayout.Space(8);
+                GUILayout.Label("Select your army, then click an adjacent location to move. Opponent armies are inspection only.",
+                    new GUIStyle(GUI.skin.label) { wordWrap = true });
+            }
 
-            DrawLegendLine(
-                "SELECTED",
-                new Color(
-                    1f,
-                    0.85f,
-                    0.15f));
-
-            DrawLegendLine(
-                "SAME OWNER",
-                new Color(
-                    0.25f,
-                    0.75f,
-                    1f));
-
-            DrawLegendLine(
-                "ALLY",
-                new Color(
-                    0.25f,
-                    0.95f,
-                    0.4f));
-
-            DrawLegendLine(
-                "HOSTILE",
-                new Color(
-                    1f,
-                    0.25f,
-                    0.25f));
-
-            GUILayout.Space(8);
-
-            GUILayout.Label(
-                "Click an army, then click an adjacent location.");
-
+            GUILayout.EndScrollView();
             GUILayout.EndArea();
         }
 
