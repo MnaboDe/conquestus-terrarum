@@ -48,15 +48,15 @@ public sealed class LifecycleSmoke : MonoBehaviour
         {
             var expected = JsonUtility.FromJson<PublicInfo>(File.ReadAllText(_share));
             var saved = _store.Load();
-            Require(_client.HasSavedSession && saved != null, "Finished save detected on process restart");
+            Require(_client.HasSavedSession && saved != null, "Active world save detected on process restart");
             _client.ContinueGame();
-            yield return Wait(() => _client.IsConnected && !_client.IsBusy, "finished reconnect");
+            yield return Wait(() => _client.IsConnected && !_client.IsBusy, "post-elimination reconnect");
             Require(_client.Session.MatchId == expected.matchId && _client.LocalPlayerId == expected.playerId &&
-                _client.Session.PlayerToken == saved.PlayerToken && _client.State.phase == "finished" && _client.LifecycleLabel == "Victory",
-                "Same credential/identity and authoritative final result after restart");
+                _client.Session.PlayerToken == saved.PlayerToken && _client.State.phase == "active" && _client.LifecycleLabel == "Game Active",
+                "Same credential/identity and Active world after restart");
             Require((long)typeof(MatchController).GetField("_updateCursor", BindingFlags.NonPublic | BindingFlags.Instance).GetValue(_client)
-                == _client.State.updateCursor, "Snapshot cursor after final reconnect");
-            CheckCommandsBlocked();
+                == _client.State.updateCursor, "Snapshot cursor after post-elimination reconnect");
+            CheckOpenWorld(expected.playerId);
             _client.ForgetSavedGame();
         }
         else
@@ -101,22 +101,45 @@ public sealed class LifecycleSmoke : MonoBehaviour
             _client.SelectArmy(_client.State.armies.First(a => a.isInBattle).id);
             var hp = _client.SelectedArmy.units.Sum(u => u.currentHitPoints);
             yield return Wait(() => _client.SelectedArmy.units.Sum(u => u.currentHitPoints) < hp, "battle detail HP");
-            // Neither client manually refreshes: elimination must be discovered via normal synchronization.
-            yield return Wait(() => _client.State.phase == "finished", "automatic elimination finish");
-            var expectedLabel = _role == "create" ? "Victory" : "Defeat";
-            Require(_client.LifecycleLabel == expectedLabel && !_client.State.isDraw, "Authoritative " + expectedLabel);
-            Require(_client.State.armies.Where(a => a.ownerId != _client.State.winnerPlayerId).All(a => a.isDestroyed), "Loser has no living army");
-            Require(_store.HasSavedSession && _client.IsConnected, "Finished map and credential remain available");
-            CheckCommandsBlocked();
-            // Server remains authoritative even when UI guards are bypassed.
-            ApiFailure rejected = null;
-            var own = _client.State.armies.First(_client.IsLocalArmy);
-            yield return _client.GetComponent<ConquestusApiClient>().RetreatArmy(_client.Session.MatchId, own.id,
-                _ => Require(false, "Post-finish API command accepted"), error => rejected = error);
-            Require(rejected != null && rejected.Status == 409, "Server rejects finished command");
+            // Neither client refreshes manually. Combat resolution is ordinary world synchronization.
+            var creator = JsonUtility.FromJson<PublicInfo>(File.ReadAllText(_share));
+            yield return Wait(() => _client.State.armies.Where(a => a.ownerId != creator.playerId).All(a => a.isDestroyed)
+                && _client.State.activeBattles.Length == 0, "army elimination through normal feed/detail sync");
+            CheckOpenWorld(creator.playerId);
+            Require(_store.HasSavedSession && _client.IsConnected, "Active map and credential remain available after elimination");
+            MatchUpdatesDto feed = null;
+            yield return _client.GetComponent<ConquestusApiClient>().GetUpdates(_client.Session.MatchId, 0,
+                page => feed = page, _ => Require(false, "Post-elimination feed unavailable"));
+            Require(feed != null && feed.updates.All(u => u.type != "MatchFinished"), "No global finish event emitted");
+            if (_role == "create")
+            {
+                var remaining = _client.State.armies.First(a => _client.IsLocalArmy(a) && !a.isDestroyed);
+                _client.SelectArmy(remaining.id);
+                _client.ClickLocation(_client.State.locations.Single(l => l.name == "West camp").id);
+                yield return Wait(() => !_client.IsBusy && _client.State.armies.Single(a => a.id == remaining.id).isMoving,
+                    "remaining army can move after elimination");
+            }
+            else
+            {
+                var own = _client.State.armies.First(_client.IsLocalArmy);
+                Require(own.isDestroyed && !_client.CanCommand(own), "Destroyed own army cannot receive commands");
+                _client.SelectArmy(own.id);
+                Require(_client.SelectedArmy != null, "Eliminated player may inspect world");
+                ApiFailure rejected = null;
+                yield return _client.GetComponent<ConquestusApiClient>().RetreatArmy(_client.Session.MatchId, own.id,
+                    _ => Require(false, "Destroyed army retreat accepted"), error => rejected = error);
+                Require(rejected != null && rejected.Status == 409, "Ordinary destroyed-army domain rejection");
+            }
             if (_role == "join") _client.ForgetSavedGame();
         }
         Finish(true, _role + " lifecycle passed");
+    }
+    private void CheckOpenWorld(string strongerPlayer)
+    {
+        Require(_client.State.phase == "active" && _client.LifecycleLabel == "Game Active", "Elimination leaves world Active");
+        Require(_client.State.armies.Where(a => a.ownerId != strongerPlayer).All(a => a.isDestroyed), "One player has no living army");
+        foreach (var army in _client.State.armies)
+            Require(_client.CanCommand(army) == (_client.IsLocalArmy(army) && !army.isDestroyed), "Active ownership eligibility");
     }
     private void CheckCommandsBlocked()
     {

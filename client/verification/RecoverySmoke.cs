@@ -166,7 +166,11 @@ public sealed class RecoverySmoke : MonoBehaviour
                 yield return Wait(() => _client.SelectedArmy.units.Sum(u => u.currentHitPoints) < hp, "focused HP polling after reconnect");
             }
             if (_mode == "resume-ended")
-                Require(_client.State.activeBattles.Length == 0 && !_client.State.armies.Any(a => a.isInBattle), "Finished battle recovered authoritatively");
+            {
+                Require(_client.State.activeBattles.Length == 0 && !_client.State.armies.Any(a => a.isInBattle), "Ended battle recovered authoritatively");
+                Require(_client.State.phase == "active" && _client.LifecycleLabel == "Game Active",
+                    "Post-combat reconnect keeps the persistent world Active");
+            }
             if (_mode == "races")
             {
                 var oldGeneration = typeof(MatchController).GetField("_stateGeneration", Private).GetValue(_client);

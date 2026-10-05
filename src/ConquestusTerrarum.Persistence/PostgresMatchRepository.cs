@@ -184,7 +184,7 @@ public sealed class PostgresMatchRepository(
 
         // Snapshot before lazy simulation and before the command.
         var lifecycleContext = await MatchLifecycleContext.LoadAsync(connection, transaction, matchId, cancellationToken);
-        var previousLifecycle = lifecycleContext?.Evaluate(world);
+        var previousLifecycle = lifecycleContext?.Evaluate();
         var before = world.CreateSnapshot();
 
         if (requireActive && previousLifecycle is { Phase: not MatchPhase.Active })
@@ -193,9 +193,6 @@ public sealed class PostgresMatchRepository(
         WorldSimulator.AdvanceTo(
             world,
             now);
-        var advancedLifecycle = lifecycleContext?.Evaluate(world);
-        if (requireActive && advancedLifecycle is { Phase: not MatchPhase.Active })
-            throw new MatchNotPlayableException(advancedLifecycle.Phase);
 
         var result =
             await operation(
@@ -212,7 +209,7 @@ public sealed class PostgresMatchRepository(
             world.CreateSnapshot();
 
         var updates =
-            await MatchLifecycleContext.DetectAsync(connection, transaction, matchId, before, after, now, lifecycleContext?.Evaluate(world), cancellationToken);
+            WorldUpdateDetector.Detect(before, after, now);
 
         var state =
             _serializer.Serialize(after);
@@ -278,7 +275,7 @@ public sealed class PostgresMatchRepository(
             result,
             nextVersion,
             now,
-            checked(sequence - 1), lifecycleContext?.Evaluate(world));
+            checked(sequence - 1), lifecycleContext?.Evaluate());
     }
     
     public async Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(
@@ -370,7 +367,7 @@ public sealed class PostgresMatchRepository(
             now);
 
     var generatedUpdates =
-        await MatchLifecycleContext.DetectAsync(connection, transaction, matchId, before, after, now, lifecycleContext?.Evaluate(world), cancellationToken);
+        WorldUpdateDetector.Detect(before, after, now);
 
     var sequence =
         nextUpdateSequence;
@@ -446,7 +443,7 @@ public sealed class PostgresMatchRepository(
         value,
         resultVersion,
         now,
-        checked(sequence - 1), lifecycleContext?.Evaluate(world));
+        checked(sequence - 1), lifecycleContext?.Evaluate());
 }
 
     /// <summary>
@@ -546,8 +543,7 @@ public sealed class PostgresMatchRepository(
             now,
             world.CheckpointTime);
 
-        var lifecycleContext = await MatchLifecycleContext.LoadAsync(connection, transaction, matchId, cancellationToken);
-    var before = world.CreateSnapshot();
+        var before = world.CreateSnapshot();
 
         // Merely polling the change feed is enough to wake
         // deterministic lazy simulation.
@@ -559,7 +555,7 @@ public sealed class PostgresMatchRepository(
             world.CreateSnapshot();
 
         var generatedUpdates =
-            await MatchLifecycleContext.DetectAsync(connection, transaction, matchId, before, afterSnapshot, now, lifecycleContext?.Evaluate(world), cancellationToken);
+            WorldUpdateDetector.Detect(before, afterSnapshot, now);
 
         var sequence =
             nextUpdateSequence;

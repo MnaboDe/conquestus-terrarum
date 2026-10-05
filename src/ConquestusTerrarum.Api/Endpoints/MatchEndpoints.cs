@@ -346,9 +346,7 @@ public static class MatchEndpoints
             Version = result.Version,
             UpdateCursor = result.UpdateCursor,
             ServerTime = result.DatabaseTime,
-            Phase = result.Lifecycle?.Phase ?? MatchPhase.Active,
-            WinnerPlayerId = result.Lifecycle?.WinnerPlayerId,
-            IsDraw = result.Lifecycle?.IsDraw ?? false
+            Phase = result.Lifecycle?.Phase ?? MatchPhase.Active
         };
     }
 

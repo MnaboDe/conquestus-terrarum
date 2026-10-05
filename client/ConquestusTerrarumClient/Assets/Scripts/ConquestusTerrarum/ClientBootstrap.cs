@@ -90,8 +90,6 @@ namespace ConquestusTerrarum.Client
             if (state != null)
             {
                 GUILayout.Label(_controller.LifecycleLabel, titleStyle);
-                if (state.phase == "finished" && !state.isDraw)
-                    GUILayout.Label("Winner: " + state.winnerPlayerId);
                 GUILayout.Label(
                     $"Version: {state.version}");
 

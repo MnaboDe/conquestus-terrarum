@@ -90,8 +90,8 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
     public int Creations { get; private set; }
     public Exception? Failure { get; set; }
     public (Guid First, Guid Second, bool Started)? Participants { get; set; }
-    private MatchLifecycle? Lifecycle(WorldState current) => Participants is { } players
-        ? MatchLifecycle.Evaluate(current, players.First, players.Second, players.Started) : null;
+    private MatchLifecycle? Lifecycle() => Participants is { } players
+        ? MatchLifecycle.Evaluate(players.Started) : null;
     public Func<CancellationToken, Task>? BeforeExecution { get; set; }
     public CancellationToken LastCancellationToken { get; private set; }
 
@@ -134,15 +134,13 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         if (Failure is { } error) throw error;
         if (matchId != MatchId) throw new MatchNotFoundException(matchId);
         var working = WorldState.Restore(Stored);
-        if (requireActive && Lifecycle(working) is { Phase: not MatchPhase.Active } previous)
+        if (requireActive && Lifecycle() is { Phase: not MatchPhase.Active } previous)
             throw new MatchNotPlayableException(previous.Phase);
         WorldSimulator.AdvanceTo(working, DatabaseTime);
-        if (requireActive && Lifecycle(working) is { Phase: not MatchPhase.Active } advanced)
-            throw new MatchNotPlayableException(advanced.Phase);
         var value = await operation(working, DatabaseTime);
         cancellationToken.ThrowIfCancellationRequested();
         Stored = working.CreateSnapshot();
-        return new MatchExecutionResult<T>(value, ++Version, DatabaseTime, Lifecycle: Lifecycle(working));
+        return new MatchExecutionResult<T>(value, ++Version, DatabaseTime, Lifecycle: Lifecycle());
     }
     
     public Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(

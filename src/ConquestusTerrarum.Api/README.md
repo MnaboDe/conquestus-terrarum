@@ -123,16 +123,23 @@ Exception stack traces stay out of responses.
 
 ## Tests and later work
 
-Production state includes camel-case `phase` (`waitingForPlayers`, `active`, `finished`), `winnerPlayerId` and `isDraw`.
-Lifecycle is derived from PostgreSQL player-slot participation and authoritative `Army.IsDestroyed` survival; credentials
-never enter WorldSnapshot. No lifecycle table/column or migration is needed. Join takes the match row lock and commits the
-slot claim, one `MatchStarted` event, row version and cursor atomically. All lazy read/command paths share the same outcome
-evaluator. Finishing reads commit meaningful world state and one minimal `MatchFinished` event together; a durable event
-presence check under that lock prevents repeats and supports already-eliminated legacy snapshots. The feed is only a
-delivery marker, never outcome authority. Joining an already-eliminated imported world announces start and finish together.
-Move/retreat require Active inside the match transaction (409 `match_waiting_for_players` / `match_finished`); ownership
-continues to use 403 while Active. Rejected commands roll back all advancement/version/feed changes. Reads and anonymous
-reconnect remain available after finish. Equal simultaneous elimination is a draw; territory and clocks do not determine victory.
+Conquestus Terrarum is a persistent strategy world. Current participation lifecycle is
+**WaitingForPlayers -> Active**. Active is open-ended: losing one player's last army, or every army in the world,
+does not end the world. There is no winner or draw result. Recruitment, economy and territory survival rules are
+future systems, not implemented features.
+
+Production state includes camel-case `phase` (`waitingForPlayers`, `active`). Participation comes only from PostgreSQL
+player-slot claims; armies/HP do not determine phase. Credentials never enter WorldSnapshot, and no schema change is
+needed. Join takes the match row lock and commits the slot claim, one `MatchStarted` event, row version and cursor
+atomically. The creator learns activation through the existing feed/resync flow without manual Refresh.
+Move/retreat require Active inside the match transaction (409 `match_waiting_for_players`); ownership remains 403 and
+ordinary gameplay conflicts remain 409. Rejected commands roll back all advancement/version/feed changes.
+After elimination, survivors may still receive valid commands and both players may read/reconnect with their original
+credentials. Empty worlds remain Active once both slots are claimed.
+
+Lazy simulation and meaningful army/battle updates continue unchanged, without a global finish event. Previously
+persisted obsolete event kinds remain readable as ordinary JSON feed entries. Unity treats unknown kinds safely by
+loading a full authoritative snapshot before acknowledging that page; old feed data cannot control participation.
 
 ```powershell
 dotnet build

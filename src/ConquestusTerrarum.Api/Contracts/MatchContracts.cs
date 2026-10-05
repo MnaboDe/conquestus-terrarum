@@ -24,9 +24,7 @@ public sealed record MatchStateResponse(
     IReadOnlyList<ArmyResponse> Armies,
     IReadOnlyList<AllianceResponse> Alliances,
     IReadOnlyList<BattleResponse> ActiveBattles,
-    MatchPhase Phase = MatchPhase.Active,
-    Guid? WinnerPlayerId = null,
-    bool IsDraw = false);
+    MatchPhase Phase = MatchPhase.Active);
 
 public sealed record LocationResponse(Guid Id, string Name, Guid? OwnerId, int CombatSlotCount);
 

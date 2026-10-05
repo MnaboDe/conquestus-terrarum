@@ -16,35 +16,37 @@ Snapshots, movement, HP, selections, and feed cursors are never saved. PostgreSQ
 restart expiry. Continue reuses the original token in Authorization and loads a full snapshot, then polls after that
 snapshot's `updateCursor`.
 
-## Match lifecycle
+## Persistent-world participation
 
-The server returns `phase` as `waitingForPlayers`, `active`, or `finished`, plus nullable `winnerPlayerId` and `isDraw`.
-Unity displays the authoritative result; it does not calculate victory from local HP or territory. No new migration is
-required: participation comes from the two persisted player slots, and survival comes from authoritative armies.
+Conquestus Terrarum is a persistent strategy world. Current lifecycle is **WaitingForPlayers -> Active**.
+Active is open-ended. Army elimination does not end the world, globally defeat a player, or produce a winner/draw.
+No recruitment/economy/territory survival system is implemented yet. A player with no living army can still inspect
+and reconnect; only their destroyed armies cannot receive ordinary army commands.
 
-1. Create a fresh game in A. The map appears with **Waiting for second player** and the copyable join code. Select both
-   owned and enemy armies for inspection. Move/Retreat must do nothing. A protected API command bypassing client guards
-   must return 409 `match_waiting_for_players` without changing snapshot, version, cursor or feed.
-2. Close/reopen A and Continue while waiting. Verify the same IDs/code, waiting label and disabled commands.
-3. Join in B. B sees **Game Active**. Leave A untouched: within normal ~2-second feed polling plus the one snapshot resync,
-   A must display **Game Active** too. The durable `MatchStarted` update starts this; no Ready button or extra lobby poll exists.
-   After start the HUD marks the invitation closed. A third player still gets match-full and cannot claim another slot.
-4. Move/retreat each player's own armies as in the movement tests below. Enemy inspection remains allowed and enemy commands
-   remain blocked locally/403 on the server. Continue while Active restores ordinary play from the full snapshot cursor.
-5. Move all opposing armies into battle and continue until one player has no army containing a living unit. The remaining
-   player sees **Victory**, the other **Defeat**, with the authoritative winner ID. If all units die on both sides, both see
-   **Draw** (`finished`, null winner, `isDraw=true`). Default equal armies can produce a draw; the isolated automated fixture
-   below changes only pre-combat unit damage to exercise a reproducible Victory/Defeat without writing a result.
-6. Without Refresh, both clients must automatically discover finish through the durable `MatchFinished` feed update or
-   a structural battle-detail resync. Final map/army inspection stays available. Move and Retreat are disabled; bypassing
-   client guards returns 409 `match_finished` without any command mutation. Repeated reads must not create duplicate finishes.
-7. Close/restart a finished client and Continue. Verify the same identity, final phase, Victory/Defeat/Draw and snapshot
-   cursor. The save remains until explicit Forget; finish never returns to the menu or removes the credential automatically.
+The server returns `phase` as `waitingForPlayers` or `active`, without result fields. Participation comes from the two
+persisted player slots, independently of armies/HP. No new migration is required.
 
-Lazy simulation still wakes on reads/polls/commands using database time. A command that discovers elimination rolls its
-transaction back, leaving persistence unchanged; a subsequent read commits the world and finish event together. There
-are no simulation workers or global HP events. In an old/imported already-eliminated world, the first eligible read
-announces the derived finish once; joining such a waiting world commits start and immediate finish together.
+1. Create a fresh game in A. The map appears with **Waiting for second player** and the copyable join code. Select owned
+   and enemy armies for inspection. Move/Retreat must do nothing. An API command bypassing client guards returns 409
+   `match_waiting_for_players` without changing snapshot, version, cursor or feed.
+2. Close/reopen A and Continue while waiting. Verify the same IDs/code/token, waiting label and disabled commands.
+3. Join in B. B sees **Game Active**. Leave A untouched: normal feed polling and one snapshot resync must automatically
+   show **Game Active**. The durable `MatchStarted` update commits atomically with the slot claim. After start the HUD
+   marks the invitation closed. A third player still gets match-full.
+4. Move/retreat each player's own armies using the tests below. Enemy inspection remains allowed; enemy commands remain
+   blocked locally/403 on the server. Continue while Active restores play from the full snapshot cursor.
+5. Send all opposing armies into battle. When one side's last army dies, both clients must still show **Game Active**.
+   Surviving owned armies can move normally. The player with no living army may inspect all world state. With equal armies,
+   combat may destroy every army; both clients must still be Active. No global result presentation or finish event appears.
+6. Without Refresh, both clients discover destruction through ordinary army/battle feed updates or structural detail resync.
+   HP continues to come from focused battle detail polling. Only ordinary domain rules block destroyed-army commands.
+7. Close/restart each client after elimination and Continue. Verify the same identity/token, Active phase, restored armies
+   and authoritative snapshot cursor. The credential remains saved until explicit Forget.
+
+Lazy simulation wakes on reads/polls/commands using database time. A valid survivor command may itself discover elimination
+and still commit. Meaningful world changes and ordinary feed events commit together. There are no simulation workers or
+global HP events. Joining an old/imported empty or already-eliminated waiting world emits only the normal start event.
+Old unknown/obsolete feed entries trigger safe snapshot resync rather than determining the world's phase.
 
 For automated lifecycle verification, use an isolated Unity copy with a unique company/product name, and copy
 `client/verification/LifecycleSmoke.cs` into that copy's Assets before building. Normal builds must exclude all smoke
@@ -58,8 +60,8 @@ harnesses. Use a fresh empty output directory, PostgreSQL migrated, solution bui
 
 This runner owns only its API process, launches two real Windows clients, observes automatic start, configures only the
 fresh test match's unit DPS through the separate .NET `client/verification/LifecycleSetup` utility, then lets real lazy
-combat eliminate one side. It verifies Victory/Defeat, blocked client/server commands, HP/detail polling and final restart
-recovery. The utility is outside production projects/Unity Assets, uses existing Npgsql, writes no phase/winner/token,
+combat eliminate one side. It verifies the world stays Active, surviving commands, HP/detail polling and post-elimination restart
+recovery. The utility is outside production projects/Unity Assets, uses existing Npgsql, writes no participation state or credentials,
 and must only target the newly created isolated verification match. Successful runs explicitly remove their test saves.
 This is automated runtime verification, not interactive UI verification. A failed run may leave a save in its test profile;
 use a new unique verification product identity for a fresh run.
@@ -113,7 +115,7 @@ These credentials and HTTP address are for local development. No AWS services ar
 17. Change selection while HP polling runs. The newly selected army must not receive the previous army's HP/flags.
 18. Select your own eligible army and click **Retreat Selected** while the battle is still active. Verify both clients observe
     its retreat and eventual arrival. Select an opponent army and confirm Retreat remains disabled even if it can retreat.
-19. If the battle has already finished, explicitly Forget and create a new match, or send the remaining armies from the camps.
+19. If the battle has already ended, send remaining armies from the camps to test another battle in the same Active world.
 20. Use **Refresh** to compare the authoritative snapshot with the displayed map. No periodic full-refresh button use should be
     needed for movement or normal feed synchronization.
 
@@ -192,7 +194,7 @@ With PostgreSQL migrated, the solution built, API port 5108 free, and a new empt
 ```
 
 The runner owns/stops only its API process, deliberately creates an outage, launches real Windows player processes,
-checks same-process Retry Load and repeated process recovery, moving/active/finished battle snapshots, focused HP,
+checks same-process Retry Load and repeated process recovery, moving/active/ended battle snapshots, focused HP,
 ownership/cursor, replacement policy, stale guards, 401/404 and Forget across restart. It writes sanitized pass/fail results
 and public IDs/code only. It removes its test saves at the end of a successful run. A failed run may leave test saves;
 use another unique verification product identity for a fresh run. Runtime automation does not constitute interactive HUD testing.

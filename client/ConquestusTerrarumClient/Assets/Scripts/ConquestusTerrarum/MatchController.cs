@@ -17,7 +17,7 @@ namespace ConquestusTerrarum.Client
         public bool HasSavedSession { get; private set; }
         public bool IsLocalArmy(ArmyDto army) => Session != null && Session.IsLocalArmy(army);
         public bool CanCommand(ArmyDto army) => ClientMatchLifecycle.CanCommand(State, Session, army);
-        public string LifecycleLabel => ClientMatchLifecycle.Label(State, LocalPlayerId);
+        public string LifecycleLabel => ClientMatchLifecycle.Label(State);
 
         public string Status { get; private set; } =
             "Disconnected. Create or join a game.";

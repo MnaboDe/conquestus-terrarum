@@ -57,7 +57,6 @@ namespace ConquestusTerrarum.Client
                 case "BattleEnded":
                 case "ArmyDestroyed":
                 case "MatchStarted":
-                case "MatchFinished":
                 default: return false;
             }
         }
@@ -160,7 +159,7 @@ namespace ConquestusTerrarum.Client
             return new MatchStateDto
             {
                 matchId = source.matchId, version = source.version, updateCursor = source.updateCursor,
-                phase = source.phase, winnerPlayerId = source.winnerPlayerId, isDraw = source.isDraw,
+                phase = source.phase,
                 serverTime = source.serverTime, checkpointTime = source.checkpointTime,
                 connections = source.connections, alliances = source.alliances, activeBattles = source.activeBattles,
                 locations = source.locations == null ? null : source.locations.Select(l => l == null ? null : new LocationDto
