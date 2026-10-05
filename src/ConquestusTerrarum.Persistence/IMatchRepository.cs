@@ -19,7 +19,8 @@ public interface IMatchRepository
     Task<MatchExecutionResult<T>> ExecuteAsync<T>(
         Guid matchId,
         Func<WorldState, DateTimeOffset, Task<T>> operation,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        bool requireActive = false);
 
     /// <summary>
     /// Advances the world to current database time for a read-only projection.

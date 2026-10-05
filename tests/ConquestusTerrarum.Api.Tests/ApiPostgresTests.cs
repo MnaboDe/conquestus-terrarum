@@ -23,6 +23,15 @@ public sealed class ApiPostgresFactAttribute : FactAttribute
     }
 }
 
+public sealed class ApiPostgresTheoryAttribute : TheoryAttribute
+{
+    public ApiPostgresTheoryAttribute()
+    {
+        if (string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("CT_TEST_CONNECTION_STRING")))
+            Skip = "Set CT_TEST_CONNECTION_STRING to run PostgreSQL API end-to-end tests.";
+    }
+}
+
 public sealed class ApiPostgresFixture : IAsyncLifetime
 {
     private readonly string _schema = "ct_api_test_" + Guid.NewGuid().ToString("N");
@@ -219,6 +228,9 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
     private async Task Authenticate(HttpClient client, Guid matchId, Guid ownerId)
     {
         var token = PlayerCredentials.GenerateToken();
+        // Existing gameplay fixtures are active two-player worlds, not waiting-session tests.
+        var snapshot = new WorldSnapshotSerializer().Deserialize((await Row(matchId)).Json);
+        var opponent = snapshot.Armies.First(a => a.OwnerId != ownerId).OwnerId;
         await using var command = database.DataSource.CreateCommand("""
             WITH session AS (
                 INSERT INTO match_sessions (match_id, join_code, created_at) VALUES ($1, $2, clock_timestamp())
@@ -226,14 +238,15 @@ public sealed class ApiPostgresTests(ApiPostgresFixture database) : IClassFixtur
             )
             INSERT INTO match_players (match_id, slot, player_id, token_hash, joined_at)
             SELECT session.match_id, player.slot, player.id, player.hash, player.joined_at
-            FROM session CROSS JOIN (VALUES (1, $3, $4, clock_timestamp()), (2, $5, NULL, NULL))
+            FROM session CROSS JOIN (VALUES (1, $3, $4, clock_timestamp()), (2, $5, $6, clock_timestamp()))
                 AS player(slot, id, hash, joined_at)
             """);
         command.Parameters.AddWithValue(matchId);
         command.Parameters.AddWithValue(PlayerCredentials.GenerateJoinCode());
         command.Parameters.AddWithValue(ownerId);
         command.Parameters.AddWithValue(PlayerCredentials.HashToken(token));
-        command.Parameters.AddWithValue(Guid.NewGuid());
+        command.Parameters.AddWithValue(opponent);
+        command.Parameters.AddWithValue(PlayerCredentials.HashToken(PlayerCredentials.GenerateToken()));
         await command.ExecuteNonQueryAsync();
         client.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
     }

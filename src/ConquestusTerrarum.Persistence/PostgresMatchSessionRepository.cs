@@ -55,7 +55,7 @@ public sealed class PostgresMatchSessionRepository(NpgsqlDataSource dataSource) 
         await using var transaction = await connection.BeginTransactionAsync(cancellationToken);
         Guid matchId;
         await using (var lookup = new NpgsqlCommand(
-                         "SELECT match_id FROM match_sessions WHERE join_code = $1 FOR UPDATE",
+                         "SELECT match_id FROM match_sessions WHERE join_code = $1",
                          connection, transaction))
         {
             lookup.Parameters.AddWithValue(joinCode);
@@ -63,16 +63,54 @@ public sealed class PostgresMatchSessionRepository(NpgsqlDataSource dataSource) 
                 ? id : throw new JoinCodeNotFoundException();
         }
 
-        // The conditional update is the claim. The row lock serializes contenders across API instances.
+        // Match lock first, matching commands and lazy reads. Invitation codes are immutable.
+        long version, sequence;
+        string json;
+        await using (var locked = new NpgsqlCommand(
+                         "SELECT version, next_update_sequence, state::text FROM matches WHERE id = $1 FOR UPDATE", connection, transaction))
+        {
+            locked.Parameters.AddWithValue(matchId);
+            await using var reader = await locked.ExecuteReaderAsync(cancellationToken);
+            if (!await reader.ReadAsync(cancellationToken)) throw new MatchNotFoundException(matchId);
+            version = reader.GetInt64(0);
+            sequence = reader.GetInt64(1);
+            json = reader.GetString(2);
+        }
+        DateTimeOffset now;
+        await using (var clock = new NpgsqlCommand("SELECT clock_timestamp()", connection, transaction))
+            now = new DateTimeOffset((DateTime)(await clock.ExecuteScalarAsync(cancellationToken))!);
+
+        // Claim, start event, version and cursor commit together. Contenders cannot start twice.
         await using var claim = new NpgsqlCommand("""
-            UPDATE match_players SET token_hash = $1, joined_at = clock_timestamp()
+            UPDATE match_players SET token_hash = $1, joined_at = $3
             WHERE match_id = $2 AND slot = 2 AND token_hash IS NULL
             RETURNING player_id
             """, connection, transaction);
         claim.Parameters.AddWithValue(tokenHash);
         claim.Parameters.AddWithValue(matchId);
+        claim.Parameters.AddWithValue(now);
         var playerId = await claim.ExecuteScalarAsync(cancellationToken) is Guid player
             ? player : throw new MatchFullException();
+        await PostgresMatchRepository.InsertUpdateAsync(connection, transaction, matchId, sequence,
+            new PendingMatchUpdate(now, "MatchStarted", "{\"phase\":\"active\"}"), cancellationToken);
+        sequence = checked(sequence + 1);
+        var participants = await MatchLifecycleContext.LoadAsync(connection, transaction, matchId, cancellationToken);
+        var world = WorldState.Restore(new WorldSnapshotSerializer().Deserialize(json));
+        var snapshot = world.CreateSnapshot();
+        foreach (var finished in await MatchLifecycleContext.DetectAsync(connection, transaction, matchId,
+                     snapshot, snapshot, now, participants?.Evaluate(world), cancellationToken))
+        {
+            await PostgresMatchRepository.InsertUpdateAsync(connection, transaction, matchId, sequence, finished, cancellationToken);
+            sequence = checked(sequence + 1);
+        }
+        await using var update = new NpgsqlCommand("""
+            UPDATE matches SET version = $1, next_update_sequence = $2, updated_at = $3 WHERE id = $4
+            """, connection, transaction);
+        update.Parameters.AddWithValue(checked(version + 1));
+        update.Parameters.AddWithValue(sequence);
+        update.Parameters.AddWithValue(now);
+        update.Parameters.AddWithValue(matchId);
+        await update.ExecuteNonQueryAsync(cancellationToken);
         await transaction.CommitAsync(cancellationToken);
         return new MatchPlayerIdentity(matchId, playerId);
     }

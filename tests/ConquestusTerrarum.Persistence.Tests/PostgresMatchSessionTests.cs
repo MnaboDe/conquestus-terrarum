@@ -45,10 +45,10 @@ public sealed class PostgresMatchSessionTests(PostgresFixture database) : IClass
     {
         var session = Session("RACE23");
         await new PostgresMatchSessionRepository(database.DataSource).CreateAsync(session, time => World(time, session));
-        // Hold the session lock until contenders have been submitted, so they compete for the same unclaimed slot.
+        // Join now shares the authoritative match lock with commands and lazy reads.
         await using var connection = await database.DataSource.OpenConnectionAsync();
         await using var transaction = await connection.BeginTransactionAsync();
-        await using var hold = new NpgsqlCommand("SELECT match_id FROM match_sessions WHERE match_id = $1 FOR UPDATE", connection, transaction);
+        await using var hold = new NpgsqlCommand("SELECT id FROM matches WHERE id = $1 FOR UPDATE", connection, transaction);
         hold.Parameters.AddWithValue(session.MatchId);
         await hold.ExecuteScalarAsync();
         using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(15));
@@ -66,6 +66,8 @@ public sealed class PostgresMatchSessionTests(PostgresFixture database) : IClass
         await transaction.CommitAsync();
         var results = await Task.WhenAll(contenders);
         var winner = Assert.Single(results, r => r.Player is not null);
+        var starts = await new PostgresMatchRepository(database.DataSource).ReadUpdatesAsync(session.MatchId, 0);
+        Assert.Single(starts.Updates, u => u.Type == "MatchStarted");
         Assert.Equal(session.SecondPlayerId, winner.Player!.PlayerId);
         foreach (var result in results)
         {

@@ -338,13 +338,17 @@ public static class MatchEndpoints
                             databaseTime,
                             0));
                 },
-                cancellationToken);
+                cancellationToken,
+                requireActive: command is not null);
 
         return result.Value with
         {
             Version = result.Version,
             UpdateCursor = result.UpdateCursor,
-            ServerTime = result.DatabaseTime
+            ServerTime = result.DatabaseTime,
+            Phase = result.Lifecycle?.Phase ?? MatchPhase.Active,
+            WinnerPlayerId = result.Lifecycle?.WinnerPlayerId,
+            IsDraw = result.Lifecycle?.IsDraw ?? false
         };
     }
 

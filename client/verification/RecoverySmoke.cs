@@ -65,6 +65,13 @@ public sealed class RecoverySmoke : MonoBehaviour
             CheckSavedIdentity();
             var own = _client.State.armies.First(_client.IsLocalArmy);
             WriteMeta(own.id);
+            if (_mode == "create")
+            {
+                Require(_client.State.phase == "waitingForPlayers", "New match waits for second player");
+                File.WriteAllText(_meta + ".waiting", "ready");
+            }
+            // MatchStarted reaches the creator via normal feed polling, without manual Refresh.
+            yield return Wait(() => _client.State.phase == "active", "second player activates match");
             _client.SelectArmy(own.id);
             _client.ClickLocation(_client.State.locations.Single(l => l.name == "Crossroads").id);
             yield return Wait(() => !_client.IsBusy && _client.SelectedArmy.isMoving, "move before closing client");

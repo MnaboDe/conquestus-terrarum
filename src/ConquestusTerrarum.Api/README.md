@@ -123,6 +123,17 @@ Exception stack traces stay out of responses.
 
 ## Tests and later work
 
+Production state includes camel-case `phase` (`waitingForPlayers`, `active`, `finished`), `winnerPlayerId` and `isDraw`.
+Lifecycle is derived from PostgreSQL player-slot participation and authoritative `Army.IsDestroyed` survival; credentials
+never enter WorldSnapshot. No lifecycle table/column or migration is needed. Join takes the match row lock and commits the
+slot claim, one `MatchStarted` event, row version and cursor atomically. All lazy read/command paths share the same outcome
+evaluator. Finishing reads commit meaningful world state and one minimal `MatchFinished` event together; a durable event
+presence check under that lock prevents repeats and supports already-eliminated legacy snapshots. The feed is only a
+delivery marker, never outcome authority. Joining an already-eliminated imported world announces start and finish together.
+Move/retreat require Active inside the match transaction (409 `match_waiting_for_players` / `match_finished`); ownership
+continues to use 403 while Active. Rejected commands roll back all advancement/version/feed changes. Reads and anonymous
+reconnect remain available after finish. Equal simultaneous elimination is a draw; territory and clocks do not determine victory.
+
 ```powershell
 dotnet build
 dotnet test

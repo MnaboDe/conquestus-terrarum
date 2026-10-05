@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using ConquestusTerrarum.Domain.World;
 
 namespace ConquestusTerrarum.Api.Contracts;
 
@@ -22,7 +23,10 @@ public sealed record MatchStateResponse(
     IReadOnlyList<ConnectionResponse> Connections,
     IReadOnlyList<ArmyResponse> Armies,
     IReadOnlyList<AllianceResponse> Alliances,
-    IReadOnlyList<BattleResponse> ActiveBattles);
+    IReadOnlyList<BattleResponse> ActiveBattles,
+    MatchPhase Phase = MatchPhase.Active,
+    Guid? WinnerPlayerId = null,
+    bool IsDraw = false);
 
 public sealed record LocationResponse(Guid Id, string Name, Guid? OwnerId, int CombatSlotCount);
 

@@ -80,7 +80,8 @@ namespace ConquestusTerrarum.Client
                 if (!string.IsNullOrEmpty(session.JoinCode))
                 {
                     GUILayout.Label("Join code: " + session.JoinCode);
-                    GUILayout.Label("Share this join code with Player 2.");
+                    GUILayout.Label(state == null || state.phase == "waitingForPlayers"
+                        ? "Share this join code with Player 2." : "Invitation closed; this match has already started.");
                     if (GUILayout.Button("Copy Join Code", GUILayout.Height(30)))
                         GUIUtility.systemCopyBuffer = session.JoinCode;
                 }
@@ -88,6 +89,9 @@ namespace ConquestusTerrarum.Client
 
             if (state != null)
             {
+                GUILayout.Label(_controller.LifecycleLabel, titleStyle);
+                if (state.phase == "finished" && !state.isDraw)
+                    GUILayout.Label("Winner: " + state.winnerPlayerId);
                 GUILayout.Label(
                     $"Version: {state.version}");
 
@@ -216,7 +220,7 @@ namespace ConquestusTerrarum.Client
             else
             {
                 if (GUILayout.Button(state == null ? "Retry Load" : "Refresh", GUILayout.Height(36))) _controller.Refresh();
-                GUI.enabled = !_controller.IsBusy && _controller.IsLocalArmy(selected) && selected.canRetreat;
+                GUI.enabled = !_controller.IsBusy && _controller.CanCommand(selected) && selected.canRetreat;
                 if (GUILayout.Button("Retreat Selected", GUILayout.Height(36))) _controller.RetreatSelectedArmy();
                 GUI.enabled = true;
                 if (GUILayout.Button("Back to Menu", GUILayout.Height(30))) _controller.Disconnect();

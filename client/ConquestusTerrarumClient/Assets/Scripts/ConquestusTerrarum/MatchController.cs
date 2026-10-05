@@ -16,6 +16,8 @@ namespace ConquestusTerrarum.Client
         public bool IsConnected => Session != null && State != null;
         public bool HasSavedSession { get; private set; }
         public bool IsLocalArmy(ArmyDto army) => Session != null && Session.IsLocalArmy(army);
+        public bool CanCommand(ArmyDto army) => ClientMatchLifecycle.CanCommand(State, Session, army);
+        public string LifecycleLabel => ClientMatchLifecycle.Label(State, LocalPlayerId);
 
         public string Status { get; private set; } =
             "Disconnected. Create or join a game.";
@@ -295,6 +297,7 @@ namespace ConquestusTerrarum.Client
         {
             if (IsBusy || _requiresFullRefresh)
                 return;
+            if (State == null || State.phase != "active") { Status = LifecycleLabel; return; }
 
             ArmyDto army =
                 SelectedArmy;
@@ -377,7 +380,7 @@ namespace ConquestusTerrarum.Client
                 SelectedArmy;
 
             if (army == null ||
-                !IsLocalArmy(army) || !army.canRetreat)
+                !CanCommand(army) || !army.canRetreat)
             {
                 return;
             }
@@ -402,7 +405,7 @@ namespace ConquestusTerrarum.Client
             ArmyDto army =
                 SelectedArmy;
 
-            if (army == null || !IsLocalArmy(army))
+            if (!CanCommand(army))
                 return;
 
             var generation = ++_stateGeneration;

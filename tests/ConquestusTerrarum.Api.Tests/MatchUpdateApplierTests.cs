@@ -83,6 +83,8 @@ public sealed class MatchUpdateApplierTests
     [InlineData("BattleEnded")]
     [InlineData("ArmyDestroyed")]
     [InlineData("ArmyRetreatStarted")]
+    [InlineData("MatchStarted")]
+    [InlineData("MatchFinished")]
     [InlineData("NewUnknownType")]
     public void AnyInsufficientEventRequiresOnePageResyncAndAcknowledgesNothing(string type)
     {

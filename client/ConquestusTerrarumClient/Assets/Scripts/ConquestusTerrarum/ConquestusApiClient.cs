@@ -114,6 +114,7 @@ namespace ConquestusTerrarum.Client
         }
 
         private static bool ValidState(MatchStateDto state, string matchId) => state != null &&
+            ClientMatchLifecycle.Valid(state) &&
             string.Equals(state.matchId, matchId, StringComparison.OrdinalIgnoreCase) &&
             state.locations != null && state.connections != null && state.armies != null &&
             state.alliances != null && state.activeBattles != null && state.updateCursor >= 0 &&
@@ -129,6 +130,8 @@ namespace ConquestusTerrarum.Client
             {
                 case "join_code_not_found": return "Join code not found. Check the code and try again.";
                 case "match_full": return "This match already has two players. Create or join another game.";
+                case "match_waiting_for_players": return "Waiting for the second player. Gameplay commands are disabled.";
+                case "match_finished": return "This match has finished. The final map remains available for inspection.";
                 case "invalid_player_token": return "Your player session was rejected (401). Return to the menu to retry or forget the saved game.";
                 case "army_not_owned": return "You can only command your own armies (403).";
                 case "match_not_found": return "This match no longer exists (404).";

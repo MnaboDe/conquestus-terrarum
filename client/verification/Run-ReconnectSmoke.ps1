@@ -86,9 +86,16 @@ try {
     Complete-Case (Start-Case 'races')
     Complete-Case (Start-Case 'invalid')
     Complete-Case (Start-Case 'empty')
-    Complete-Case (Start-Case 'create')
+    $taskCreating = Start-Case 'create'
+    $taskDeadline = [DateTime]::UtcNow.AddSeconds(25)
+    while (!(Test-Path -LiteralPath ($taskCreator + '.waiting'))) {
+        if ([DateTime]::UtcNow -gt $taskDeadline) { throw 'Creator waiting snapshot timed out.' }
+        Start-Sleep -Milliseconds 100
+    }
+    $taskJoining = Start-Case 'join' 'join'
+    Complete-Case $taskCreating
+    Complete-Case $taskJoining
     Complete-Case (Start-Case 'resume-moving')
-    Complete-Case (Start-Case 'join' 'join')
     Complete-Case (Start-Case 'resume-moving' 'join')
     $taskBattleA = Start-Case 'resume-battle'
     $taskBattleB = Start-Case 'resume-battle' 'join'

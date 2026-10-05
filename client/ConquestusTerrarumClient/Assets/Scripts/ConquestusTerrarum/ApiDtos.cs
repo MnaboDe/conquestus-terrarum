@@ -28,6 +28,9 @@ namespace ConquestusTerrarum.Client
     [Serializable]
     public class MatchStateDto
     {
+        public string phase;
+        public string winnerPlayerId;
+        public bool isDraw;
         public string matchId;
         public long version;
         public long updateCursor;

@@ -51,6 +51,7 @@ internal sealed class RecordingSessionRepository(RecordingMatchRepository matche
         if (CollisionsRemaining-- > 0) throw new JoinCodeCollisionException();
         await matches.CreateAsync(session.MatchId, worldFactory, cancellationToken);
         _session = session;
+        matches.Participants = (session.FirstPlayerId, session.SecondPlayerId, false);
         _secondHash = null;
     }
 
@@ -61,6 +62,7 @@ internal sealed class RecordingSessionRepository(RecordingMatchRepository matche
         if (_session?.JoinCode != joinCode) throw new JoinCodeNotFoundException();
         if (_secondHash is not null) throw new MatchFullException();
         _secondHash = tokenHash;
+        matches.Participants = (_session.FirstPlayerId, _session.SecondPlayerId, true);
         return Task.FromResult(new MatchPlayerIdentity(_session.MatchId, _session.SecondPlayerId));
     }
 
@@ -87,6 +89,9 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
     public int Loads { get; private set; }
     public int Creations { get; private set; }
     public Exception? Failure { get; set; }
+    public (Guid First, Guid Second, bool Started)? Participants { get; set; }
+    private MatchLifecycle? Lifecycle(WorldState current) => Participants is { } players
+        ? MatchLifecycle.Evaluate(current, players.First, players.Second, players.Started) : null;
     public Func<CancellationToken, Task>? BeforeExecution { get; set; }
     public CancellationToken LastCancellationToken { get; private set; }
 
@@ -120,7 +125,7 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
 
     public async Task<MatchExecutionResult<T>> ExecuteAsync<T>(Guid matchId,
         Func<WorldState, DateTimeOffset, Task<T>> operation,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default, bool requireActive = false)
     {
         LastCancellationToken = cancellationToken;
         cancellationToken.ThrowIfCancellationRequested();
@@ -129,11 +134,15 @@ internal sealed class RecordingMatchRepository(WorldState world, DateTimeOffset 
         if (Failure is { } error) throw error;
         if (matchId != MatchId) throw new MatchNotFoundException(matchId);
         var working = WorldState.Restore(Stored);
+        if (requireActive && Lifecycle(working) is { Phase: not MatchPhase.Active } previous)
+            throw new MatchNotPlayableException(previous.Phase);
         WorldSimulator.AdvanceTo(working, DatabaseTime);
+        if (requireActive && Lifecycle(working) is { Phase: not MatchPhase.Active } advanced)
+            throw new MatchNotPlayableException(advanced.Phase);
         var value = await operation(working, DatabaseTime);
         cancellationToken.ThrowIfCancellationRequested();
         Stored = working.CreateSnapshot();
-        return new MatchExecutionResult<T>(value, ++Version, DatabaseTime);
+        return new MatchExecutionResult<T>(value, ++Version, DatabaseTime, Lifecycle: Lifecycle(working));
     }
     
     public Task<MatchExecutionResult<T>> QueryCurrentAsync<T>(

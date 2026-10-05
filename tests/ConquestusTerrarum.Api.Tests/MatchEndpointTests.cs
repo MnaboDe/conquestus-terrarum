@@ -15,7 +15,8 @@ public class MatchEndpointTests
 {
     internal static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
-        Converters = { new JsonStringEnumConverter<MovementKindResponse>(JsonNamingPolicy.CamelCase) }
+        Converters = { new JsonStringEnumConverter<MovementKindResponse>(JsonNamingPolicy.CamelCase),
+            new JsonStringEnumConverter<MatchPhase>(JsonNamingPolicy.CamelCase) }
     };
 
     private static WorldState Peaceful()
