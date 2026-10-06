@@ -1,4 +1,4 @@
-﻿namespace ConquestusTerrarum.Domain.World;
+namespace ConquestusTerrarum.Domain.World;
 
 public sealed partial class WorldState
 {
@@ -186,7 +186,12 @@ public sealed partial class WorldState
 
         _battles.Remove(locationId);
 
-        foreach (var army in armiesAtLocation) army.LeaveBattle();
+        foreach (var army in armiesAtLocation)
+        {
+            if (army.IsInBattle)
+                foreach (var unit in army.Units) unit.ResolveBattleExit(retreated: false);
+            army.LeaveBattle();
+        }
 
         if (resolveOwnership)
             ResolveOwnerAfterBattle(
@@ -269,7 +274,7 @@ public sealed partial class WorldState
                 battleLocationId,
                 retreatLocationId);
 
-        foreach (var unit in army.Units.Where(unit => unit.IsWounded)) unit.Kill();
+        foreach (var unit in army.Units) unit.ResolveBattleExit(retreated: true);
         army.RemoveIfDestroyed();
         if (!army.IsDestroyed)
             army.StartRetreat(

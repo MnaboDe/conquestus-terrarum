@@ -69,7 +69,12 @@ $state = Invoke-RestMethod "$base/api/v1/matches/$matchId/armies/$westArmy/retre
 $state.armies | Where-Object id -eq $westArmy
 ```
 
-Retreat follows existing domain rules, including loss of wounded units. Illegal actions return 409. Retreat and
+Successful retreat from active battle kills each living wounded unit; healthy units survive and travel normally.
+If no living unit remains, the army is destroyed without travel. At actual battle termination, wounded living units of
+participating armies remaining at the location immediately heal to full HP. Dead units never recover. This is a one-time
+domain transition, not regeneration; retreat rejection adds no casualties. Snapshots/details expose the persisted result,
+and existing coarse battle/retreat/destruction events request client resync without a continuous HP feed.
+See [domain combat rules](../ConquestusTerrarum.Domain/World/COMBAT.md). Illegal actions return 409. Retreat and
 development creation accept no body. Move accepts only
 `destinationLocationId`; missing, malformed, empty or extra fields are rejected. These routes accept no query
 parameters, including command timestamps.

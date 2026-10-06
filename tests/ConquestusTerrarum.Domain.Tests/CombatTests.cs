@@ -63,7 +63,7 @@ public class CombatTests
     }
 
     [Fact]
-    public void PastDeath_SurvivorKeepsHpAndTakesOwnership()
+    public void PastDeath_SurvivorHealsAndTakesOwnership()
     {
         var a = Unit(101, dps: 20);
         var b = Unit(102, dps: 10);
@@ -71,7 +71,7 @@ public class CombatTests
         var loser = Army(12, 22, 1, b);
         var world = World([winner, loser]);
         Advance(world, 100000);
-        Assert.Equal(50, a.CurrentHitPoints);
+        Assert.Equal(100, a.CurrentHitPoints);
         Assert.Equal(0, b.CurrentHitPoints);
         Assert.True(loser.IsDestroyed);
         Assert.Null(loser.LocationId);
@@ -98,7 +98,7 @@ public class CombatTests
     }
 
     [Fact]
-    public void SurvivorReturnsToPool_AndCanFightAgainWithoutHealing()
+    public void SurvivorReturnsToPoolWithoutHealingUntilBattleEnds()
     {
         var a = Unit(101, 100, 20);
         var enemy = Army(12, 22, 1, Unit(102, 20), Unit(103, 20));
@@ -110,8 +110,11 @@ public class CombatTests
                 ? world.Battles.Single().Slots.Single().SecondUnitId
                 : world.Battles.Single().Slots.Single().FirstUnitId,
             enemy.Units.Where(u => u.IsAlive).Select(u => u.Id));
+        Advance(world, 1.5m);
+        Assert.Equal(85, a.CurrentHitPoints);
+        Assert.Single(world.Battles);
         Advance(world, 2);
-        Assert.Equal(80, a.CurrentHitPoints);
+        Assert.Equal(100, a.CurrentHitPoints);
         Assert.True(enemy.IsDestroyed);
     }
 
@@ -186,7 +189,7 @@ public class CombatTests
         Assert.All(world.Battles.Single().Slots, s => Assert.Equal(Start.AddSeconds(1), s.PairedAt));
         Advance(world, 2);
         Assert.True(b.IsDestroyed);
-        Assert.All(a.Units, u => Assert.Equal(98, u.CurrentHitPoints));
+        Assert.All(a.Units, u => Assert.Equal(100, u.CurrentHitPoints));
     }
 
     private static WorldState ArrivalWorld(bool reverse = false, bool atDeath = false)
@@ -251,7 +254,7 @@ public class CombatTests
         Assert.Equal(85, armies[3].Units.Single().CurrentHitPoints);
         Assert.Single(world.Battles);
         Advance(world, 30);
-        Assert.Equal(80, armies[3].Units.Single().CurrentHitPoints);
+        Assert.Equal(100, armies[3].Units.Single().CurrentHitPoints);
         Assert.True(armies[2].IsDestroyed);
         Assert.Empty(world.Battles);
     }
@@ -326,7 +329,7 @@ public class CombatTests
         world.Retreat(army.Id, Start.AddSeconds(2));
         Assert.True(army.IsDestroyed);
         Assert.Null(army.Movement);
-        Assert.Equal(99, world.GetArmy(Id(12)).Units.Single().CurrentHitPoints);
+        Assert.Equal(100, world.GetArmy(Id(12)).Units.Single().CurrentHitPoints); // Remaining survivor heals at battle end.
         Assert.Equal(Start.AddSeconds(2), world.CheckpointTime);
         Assert.Empty(world.Battles);
     }

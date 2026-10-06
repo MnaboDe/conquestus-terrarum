@@ -27,8 +27,10 @@ public sealed class Unit
         CurrentHitPoints = Math.Min(CurrentHitPoints, Math.Max(0, hitPoints));
     }
 
-    internal void Kill()
+    // Immediate authoritative exit consequence, never a regeneration tick.
+    internal void ResolveBattleExit(bool retreated)
     {
-        CurrentHitPoints = 0;
+        if (IsWounded)
+            CurrentHitPoints = retreated ? 0 : MaxHitPoints;
     }
 }

@@ -9,7 +9,7 @@ At each boundary T the simulator performs these phases:
 2. B: resolve simultaneous deaths and release slot survivors together.
 3. C: remove destroyed armies from locations and movement.
 4. D: apply all arrivals at T as one batch.
-5. E: reconcile battle existence and each army's pairwise hostile participation.
+5. E: reconcile battle existence and each army's pairwise hostile participation; resolve remaining participants' wounds when a battle ends.
 6. F: refill vacant slots from idle living units using deterministic randomness.
 7. G: resolve ownership for ended battles using surviving entry timestamps.
 8. H: commit the world checkpoint.
@@ -18,10 +18,25 @@ Arrivals at a death boundary are included before battle lifetime and ownership a
 the casualties, the existing battle continues. An occupied valid slot continues until a death or withdrawal; arrivals
 fill only vacant slots. After a death, its survivor returns to the random candidate pool.
 
-Units require explicit IDs, HP and DPS; zero DPS is permitted. Empty or entirely dead armies are destroyed. HP never
-regenerates. Retreat commands first advance to their timestamp, then kill all wounded living units. If any healthy units
-remain, normal retreat travel starts. Otherwise the army is destroyed without movement. Existing retreat destination and
-lock rules remain in force.
+Units require explicit IDs, HP and DPS; zero DPS is permitted. Empty or entirely dead armies are destroyed.
+
+Post-battle wounds resolve immediately at the authoritative domain boundary:
+
+- A living wounded unit (`0 < CurrentHitPoints < MaxHitPoints`) dies when its army successfully retreats from an active battle.
+- Living wounded units of participating armies that remain at the location heal to MaxHitPoints when that battle actually ends.
+- Healthy retreating units survive normally. Healthy remaining units are unchanged. Dead units are never revived.
+
+Retreat first advances combat to the command timestamp, then validates eligibility and the connected retreat destination
+before resolving wounds. If any healthy units remain, existing retreat travel starts; otherwise the army is destroyed
+without movement. A rejected request causes no retreat casualties. Existing destination and retreat-lock rules remain.
+Withdrawal from a continuing multi-participant battle does not heal the remaining combatants yet. Nonparticipants,
+unrelated locations and ordinary idle reads never heal. Reconciliation removes the active battle before resolving its
+remaining participants, so the consequence occurs once for any supported battle-ending cause, including elimination
+or retreat. No gradual regeneration, healing tick, background worker or Unity-side prediction exists.
+
+The same lazy transition runs for authoritative state, update-feed, focused-detail and command wake-ups under the existing
+per-world row lock. HP/deaths persist in the snapshot with the existing coarse BattleEnded/ArmyDestroyed/ArmyRetreatStarted
+events; no per-unit healing events or continuous global HP feed are added. Repeated reads preserve the resolved state.
 
 Location.CombatSlotCount defaults to one and must be positive. Pair eligibility comes from WorldState.AreHostile,
 supporting alliances and free-for-all battles. Candidate pairs are enumerated in explicit army/unit ID order, then

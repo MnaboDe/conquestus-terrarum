@@ -149,7 +149,9 @@ These credentials and HTTP address are for local development. No AWS services ar
     (approximately every 0.75 seconds). Selecting the opponent's battling army for inspection is allowed.
 17. Change selection while HP polling runs. The newly selected army must not receive the previous army's HP/flags.
 18. Select your own eligible army and click **Retreat** while the battle is still active. Verify both clients observe
-    its retreat and eventual arrival. Select an opponent army and confirm Retreat remains disabled even if it can retreat.
+    the authoritative wounded-unit losses. Healthy reserves survive and travel to the existing retreat destination;
+    an entirely wounded army is destroyed without travel. When the battle ends, remaining living wounded units immediately
+    show full HP, and dead units remain dead. Select an opponent army and confirm Retreat remains disabled even if it can retreat.
 19. If the battle has already ended, send remaining armies from the camps to test another battle in the same Active world.
 20. Back to Menu and Continue loads a fresh authoritative snapshot for comparison. Normal movement/feed synchronization
     requires no refresh action.
@@ -236,6 +238,31 @@ and public IDs/code only. It removes its test saves at the end of a successful r
 use another unique verification product identity for a fresh run. Runtime automation does not constitute interactive HUD testing.
 
 ## Regression and batch build
+
+### Focused post-battle wounds smoke
+
+`client/verification/PostBattleWoundsSmoke.cs` uses the unchanged production client to Create/Join, move one army
+from each player into combat, observe live wounds through focused details, retreat the creator, verify dead wounded
+units/healthy reserves/full healing of remaining participants, then reconnect both players after an API/player restart.
+World stays Active. The pre-existing dead fixture units must remain dead. Consequences come from authoritative snapshots;
+the harness does not implement gameplay in Unity.
+
+Use the same isolated-copy/save-identity precautions described above. Copy `PostBattleWoundsSmoke.cs` into that copy's
+Assets and build with the existing helper. Normal runtime Assets must never contain this source. Build the solution,
+keep API port 5108 free, and use a fresh output directory:
+
+```powershell
+& .\client\verification\Run-PostBattleWoundsSmoke.ps1 `
+  -PlayerPath 'C:\path\to\isolated-project\Builds\Windows\ConquestusTerrarum.exe' `
+  -OutputDirectory 'C:\path\to\ignored\Builds\WoundsResults-new-run'
+```
+
+`WoundsSetup` is a separate verification-only .NET executable. Under the isolated world's row lock it configures
+low DPS/high HP, three living units and one dead unit per army before movement. Two existing combat slots leave healthy
+reserves, providing time to observe both sides wounded. It changes no participation, outcomes or production rules.
+The runner builds its API and fixture before player launch, starts/stops only its own API, restarts it after resolution,
+checks four player results and clears both test
+saves after successful reconnects. No credentials are written to result/public metadata. Native visual QA is separate.
 
 ```powershell
 & 'C:\Program Files\dotnet\dotnet.exe' build .\ConquestusTerrarum.sln
