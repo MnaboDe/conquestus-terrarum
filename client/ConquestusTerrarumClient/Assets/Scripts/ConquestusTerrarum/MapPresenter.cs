@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
@@ -8,6 +8,12 @@ namespace ConquestusTerrarum.Client
     public sealed class MapPresenter : MonoBehaviour
     {
         private MatchController _controller;
+        private Rect _viewport = new Rect(0, 0, 1, 1);
+        public void SetViewport(Rect viewport)
+        {
+            _viewport = viewport;
+            ConfigureViewport(Camera.main);
+        }
         private MatchStateDto _presentedState;
 
         private readonly Dictionary<string, Vector2> _locationPositions =
@@ -762,7 +768,7 @@ namespace ConquestusTerrarum.Client
                 : id.Substring(0, 6);
         }
 
-        private static void ConfigureCamera()
+        private void ConfigureCamera()
         {
             Camera camera = Camera.main;
 
@@ -779,12 +785,11 @@ namespace ConquestusTerrarum.Client
                     -10f);
         }
 
-        private static void ConfigureViewport(Camera camera)
+        private void ConfigureViewport(Camera camera)
         {
             if (camera == null || Screen.width <= 0 || Screen.height <= 0) return;
-            // Keep every location reachable beside the HUD, including after resizing a standalone window.
-            var left = Mathf.Clamp01((DebugHud.PanelRect.xMax + 15) / Screen.width);
-            camera.rect = new Rect(left, 0, 1 - left, 1);
+            // Layout supplies normalized map bounds; movement and interpolation are unchanged.
+            camera.rect = _viewport;
             camera.orthographicSize = Mathf.Max(6.5f, 5.2f / camera.aspect);
         }
     }

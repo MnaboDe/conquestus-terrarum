@@ -1,4 +1,6 @@
-﻿using UnityEngine;
+using System.Collections.Generic;
+using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
 
 namespace ConquestusTerrarum.Client
@@ -6,6 +8,17 @@ namespace ConquestusTerrarum.Client
     public sealed class PointerInput : MonoBehaviour
     {
         private MatchController _controller;
+
+        public static bool IsUiBlocking(Vector2 screenPosition)
+        {
+            var system = EventSystem.current;
+            if (system == null) return true; // Fail closed if scene wiring is missing.
+            var hits = new List<RaycastResult>();
+            system.RaycastAll(new PointerEventData(system) { position = screenPosition }, hits);
+            foreach (var hit in hits)
+                if (hit.gameObject.GetComponentInParent<Canvas>() != null) return true;
+            return false;
+        }
 
         private void Awake()
         {
@@ -34,17 +47,18 @@ namespace ConquestusTerrarum.Client
             if (screenPosition == null)
                 return;
 
-            // IMGUI uses a top-left origin. HUD interaction must not also command the map behind it.
-            var guiPosition = new Vector2(screenPosition.Value.x, Screen.height - screenPosition.Value.y);
-            if (DebugHud.PanelRect.Contains(guiPosition)) return;
+            HandlePointer(screenPosition.Value);
+        }
 
+        // Shared by the real pointer path and built-player raycast verification.
+        public void HandlePointer(Vector2 screenPosition)
+        {
+            if (_controller == null || !_controller.IsConnected || _controller.IsBusy || IsUiBlocking(screenPosition)) return;
             var camera = Camera.main;
-
-            if (camera == null)
-                return;
+            if (camera == null || !camera.pixelRect.Contains(screenPosition)) return;
 
             var worldPosition =
-                (Vector2)camera.ScreenToWorldPoint(screenPosition.Value);
+                (Vector2)camera.ScreenToWorldPoint(screenPosition);
 
             var hits =
                 Physics2D.OverlapPointAll(worldPosition);

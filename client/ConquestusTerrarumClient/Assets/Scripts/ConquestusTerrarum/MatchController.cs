@@ -1,5 +1,6 @@
-﻿using System;
+using System;
 using System.Collections;
+using System.Collections.Generic;
 using System.Linq;
 using UnityEngine;
 
@@ -10,23 +11,29 @@ namespace ConquestusTerrarum.Client
         private const float UpdatePollIntervalSeconds = 2f;
         private const float BattleDetailPollIntervalSeconds = 0.75f;
 
-        public MatchStateDto State { get; private set; }
-        public MultiplayerSession Session { get; private set; }
+        private MatchStateDto _state;
+        public MatchStateDto State { get => _state; private set => SetPresentation(ref _state, value); }
+        private MultiplayerSession _session;
+        public MultiplayerSession Session { get => _session; private set => SetPresentation(ref _session, value); }
         public string LocalPlayerId => Session?.PlayerId;
         public bool IsConnected => Session != null && State != null;
-        public bool HasSavedSession { get; private set; }
+        private bool _hasSavedSession;
+        public bool HasSavedSession { get => _hasSavedSession; private set => SetPresentation(ref _hasSavedSession, value); }
         public bool IsLocalArmy(ArmyDto army) => Session != null && Session.IsLocalArmy(army);
         public bool CanCommand(ArmyDto army) => ClientMatchLifecycle.CanCommand(State, Session, army);
         public string LifecycleLabel => ClientMatchLifecycle.Label(State);
 
-        public string Status { get; private set; } =
-            "Disconnected. Create or join a game.";
+        private string _status = "Disconnected. Create or join a game.";
+        public string Status { get => _status; private set => SetPresentation(ref _status, value); }
 
-        public string LastError { get; private set; }
+        private string _lastError;
+        public string LastError { get => _lastError; private set => SetPresentation(ref _lastError, value); }
 
-        public bool IsBusy { get; private set; }
+        private bool _isBusy;
+        public bool IsBusy { get => _isBusy; private set => SetPresentation(ref _isBusy, value); }
 
-        public string SelectedArmyId { get; private set; }
+        private string _selectedArmyId;
+        public string SelectedArmyId { get => _selectedArmyId; private set => SetPresentation(ref _selectedArmyId, value); }
 
         public ArmyDto SelectedArmy
         {
@@ -47,6 +54,35 @@ namespace ConquestusTerrarum.Client
                             StringComparison.Ordinal));
             }
         }
+
+        public event Action PresentationChanged;
+        public long PresentationRevision { get; private set; }
+        private bool _presentationDirty = true;
+
+        private void SetPresentation<T>(ref T field, T value)
+        {
+            if (EqualityComparer<T>.Default.Equals(field, value)) return;
+            field = value;
+            MarkPresentationChanged();
+        }
+
+        private void MarkPresentationChanged()
+        {
+            PresentationRevision++;
+            _presentationDirty = true;
+        }
+
+        private void LateUpdate()
+        {
+            if (!_presentationDirty) return;
+            _presentationDirty = false;
+            PresentationChanged?.Invoke();
+        }
+
+        public void DismissError() => LastError = null;
+        public bool CanMoveSelected => !IsBusy && !_requiresFullRefresh && CanCommand(SelectedArmy) &&
+            !SelectedArmy.isMoving && !SelectedArmy.isInBattle && !string.IsNullOrWhiteSpace(SelectedArmy.locationId);
+        public bool CanRetreatSelected => !IsBusy && !_requiresFullRefresh && CanCommand(SelectedArmy) && SelectedArmy.canRetreat;
 
         private ConquestusApiClient _api;
         private ISessionStorage _sessionStorage;
@@ -174,9 +210,9 @@ namespace ConquestusTerrarum.Client
             DetectSavedSession();
             if (HasSavedSession) { HandleError("Choose Forget Saved Game before joining another game."); return; }
             var code = MultiplayerSession.NormalizeJoinCode(joinCode);
-            if (!MultiplayerSession.ValidJoinCode(code))
+            if (ClientInputValidation.JoinCodeError(code) is string validation)
             {
-                HandleError("Enter a six-character join code, using the letters and digits shown by Player 1.");
+                HandleError(validation);
                 return;
             }
             Disconnect();
@@ -756,6 +792,7 @@ namespace ConquestusTerrarum.Client
                 return;
             }
             army.units = details.units;
+            MarkPresentationChanged();
             // The detail response was calculated at this
             // authoritative server timestamp.
             DateTimeOffset serverTime;
@@ -807,8 +844,7 @@ namespace ConquestusTerrarum.Client
             LastError = error;
             Status = "Request failed.";
 
-            Debug.LogError(
-                error);
+            // Expected validation/network failures are shown through presentation notifications.
         }
 
         private bool HasConnection(

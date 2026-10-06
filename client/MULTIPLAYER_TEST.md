@@ -2,9 +2,9 @@
 
 Use Unity **6000.6.1f1**, the system **.NET 10** SDK, and two independent clients talking to
 `http://localhost:5108`. One anonymous session is saved locally after successful Create/Join, before the first
-snapshot GET. Startup stays disconnected and offers **Continue Game** when a saved record exists.
-**Back to Menu** (`Disconnect()` in code) clears only the active view and keeps the save. **Forget Saved Game**
-removes the local credential permanently; it does not free the occupied server slot. Forget before creating/joining
+snapshot GET. Startup stays disconnected and offers **Continue** when a saved record exists.
+**Back to Menu** (`Disconnect()` in code) clears only the active view and keeps the save. **Forget Saved World**
+opens a confirmation before removing the local credential permanently; it does not free the occupied server slot. Forget before creating/joining
 another game. The join code cannot recover a previously occupied slot.
 
 The MVP stores only match ID, player ID, opaque player token, and optional join code in a single versioned PlayerPrefs
@@ -29,19 +29,19 @@ persisted player slots, independently of armies/HP. No new migration is required
 1. Create a fresh game in A. The map appears with **Waiting for second player** and the copyable join code. Select owned
    and enemy armies for inspection. Move/Retreat must do nothing. An API command bypassing client guards returns 409
    `match_waiting_for_players` without changing snapshot, version, cursor or feed.
-2. Close/reopen A and Continue while waiting. Verify the same IDs/code/token, waiting label and disabled commands.
-3. Join in B. B sees **Game Active**. Leave A untouched: normal feed polling and one snapshot resync must automatically
-   show **Game Active**. The durable `MatchStarted` update commits atomically with the slot claim. After start the HUD
+2. Close/reopen A and Continue while waiting. Verify the same invitation/army identity labels, waiting label and disabled commands.
+3. Join in B. B sees **Active world**. Leave A untouched: normal feed polling and one snapshot resync must automatically
+   show **Active world**. The durable `MatchStarted` update commits atomically with the slot claim. After start the HUD
    marks the invitation closed. A third player still gets match-full.
 4. Move/retreat each player's own armies using the tests below. Enemy inspection remains allowed; enemy commands remain
    blocked locally/403 on the server. Continue while Active restores play from the full snapshot cursor.
-5. Send all opposing armies into battle. When one side's last army dies, both clients must still show **Game Active**.
+5. Send all opposing armies into battle. When one side's last army dies, both clients must still show **Active world**.
    Surviving owned armies can move normally. The player with no living army may inspect all world state. With equal armies,
    combat may destroy every army; both clients must still be Active. No global result presentation or finish event appears.
 6. Without Refresh, both clients discover destruction through ordinary army/battle feed updates or structural detail resync.
    HP continues to come from focused battle detail polling. Only ordinary domain rules block destroyed-army commands.
-7. Close/restart each client after elimination and Continue. Verify the same identity/token, Active phase, restored armies
-   and authoritative snapshot cursor. The credential remains saved until explicit Forget.
+7. Close/restart each client after elimination and Continue. Verify the same ownership, Active phase and restored armies.
+   Automated harnesses also verify token equality and authoritative cursor without logging the token. The credential remains saved until explicit Forget.
 
 Lazy simulation wakes on reads/polls/commands using database time. A valid survivor command may itself discover elimination
 and still commit. Meaningful world changes and ordinary feed events commit together. There are no simulation workers or
@@ -66,7 +66,42 @@ and must only target the newly created isolated verification match. Successful r
 This is automated runtime verification, not interactive UI verification. A failed run may leave a save in its test profile;
 use a new unique verification product identity for a fresh run.
 
-## Backend
+## UI Foundation manual QA
+
+Use editor + standalone with independent local saves and the API running. Inspect 1280x720,
+1920x1080 and 2560x1440: labels should fit, buttons should remain reachable and the map should fit
+WorldMapArea. There is no primary OnGUI HUD. See `UI_ARTIST_GUIDE.md` for prefab editing.
+
+1. With no save, Main Menu offers Create World and a join field. Submit empty, short and invalid-alphabet
+   codes: inline feedback, no red Unity console error, no network operation. Lowercase/outer whitespace normalize.
+2. Create World: Connecting shows useful status without fake percentages, then World shows waiting status,
+   copyable invitation and disabled orders. Select an army; its identity, ownership, location, units and HP appear.
+3. In B, Join World with A's code. Connecting leads to World. A becomes Active automatically; the same World
+   screen stays visible, the invitation closes and valid orders unlock. No Results/Defeat screen exists.
+4. Select foreign/own armies. Foreign inspection has no retreat control; owned armies show command eligibility.
+   Click a connected location to move, observe both clients, then select a battling army and watch HP update.
+   Click Retreat when available and verify both clients observe it.
+5. Click Copy code, Back to Menu, panel backgrounds, join field and error Dismiss. No underlying map selection
+   or movement may occur. Click clear map space to confirm normal selection/movement still works.
+6. Back to Menu retains the save; Continue shows Connecting and restores the same player/world. Restart the
+   process and Continue again in waiting, moving, battle and Active states. Polling and ownership must recover.
+7. Stop the backend after saving, restart the client and Continue. A readable inline error returns to Main Menu;
+   the credential stays saved. Restart the API and Retry Load to recover. During an in-world command failure,
+   the reusable error overlay shows sanitized feedback and Dismiss works; world inspection remains possible.
+8. Back to Menu, open Forget Saved World and cancel: saved access remains and background controls resume.
+   Reopen and confirm Forget, then restart: Continue is absent and Create/Join return. Forget does not
+   release a server slot. Invalid credentials/missing world retain an explanatory error and explicit Forget.
+9. During a pending command/resync, Back to Menu and Continue again. Old callbacks must not reopen a screen
+   or overwrite the new session. Army elimination keeps World Active and resumable.
+
+Automated UI verification uses `verification/UiFoundationSmoke.cs` in an isolated graphical build with a
+unique company/product identity (never the normal profile). Copy it into only that copy's Assets and build;
+run `verification/Run-UiFoundationSmoke.ps1 -PlayerPath <isolated exe> -OutputDirectory <fresh ignored folder>`.
+It dispatches real uGUI button events, uses production map hit-testing/raycasts, captures all three resolutions,
+and verifies two-player flow, retreat, outage/retry, restart and Forget. It is runtime automation rather than
+human mouse/keyboard QA. Keep the manual checklist above for native focus, typing and pointer interaction.
+
+## Backend setup
 
 From `C:\Users\marin\Projects\ConquestusTerrarum` in PowerShell:
 
@@ -87,21 +122,21 @@ These credentials and HTTP address are for local development. No AWS services ar
 2. Open `Assets/Scenes/SampleScene.unity`. Use **Conquestus Terrarum > Build Windows Client** to build the standalone
    executable to `client/ConquestusTerrarumClient/Builds/Windows/ConquestusTerrarum.exe`. The build uses the enabled scenes
    and Windows x64 development target. The build folder is ignored by Git.
-3. Press Play in the editor for Client A. With no saved game it starts **Disconnected**, with **Create Game**, a join-code
-   field and **Join Game**. If a prior save exists, explicitly Forget it before this fresh-match test.
-4. Click **Create Game**. Wait for the authoritative map to load in **Waiting for second player**. The HUD shows the match ID, local player ID,
-   and six-character join code. It never displays a player token.
-5. Click **Copy Join Code**, or read the code from the HUD.
+3. Press Play in the editor for Client A. With no saved game it starts at **Main Menu**, with **Create World**, a join-code
+   field and **Join World**. If a prior save exists, explicitly Forget it before this fresh-match test.
+4. Click **Create World**. Wait for the authoritative map to load in **Waiting for second player**. The waiting HUD shows
+   the public six-character invitation code. It never displays a player token.
+5. Click **Copy code**, or read the code from the HUD.
 6. Launch the standalone executable for Client B. Use **editor + standalone** for independent local PlayerPrefs profiles.
    Two standalone instances of the same product share one local save and are not separate player profiles; use separate
    OS users or an isolated verification build with distinct test stores for that case. Leave the editor in Play Mode;
    standalone processes continue updating in the background.
-7. Enter A's code in B's join-code field and click **Join Game**. Lowercase and surrounding whitespace are accepted.
-8. Verify A and B show the **same match ID**, the same four locations, and the same army IDs/owners. Their **local player IDs differ**.
+7. Enter A's code in B's join-code field and click **Join World**. Lowercase and surrounding whitespace are accepted.
+8. Verify A and B show the same four locations, army markers and army IDs. Ownership labels are relative to each player.
    The initial world has two armies for each player, including the second player's armies before they join.
-   Both clients must become **Game Active**, with A learning the start automatically before either issues movement.
-9. In A, select an army whose owner matches A's local player ID. The HUD says **YOUR ARMY**. Select a B-owned army;
-   it says **OPPONENT ARMY — inspection only**. Clicking another location must not move it, and Retreat must be disabled.
+   Both clients must become **Active world**, with A learning the start automatically before either issues movement.
+9. In A, select an army at West camp. The HUD says **YOUR ARMY**. Select a B-owned army;
+   it says **OTHER PLAYER · INSPECTION**. Clicking another location must not move it, and Retreat must be disabled.
 10. Repeat in B, verifying B can control only B-owned armies. Relation colors still describe the selected army's relations;
     the HUD's YOUR/OPPONENT label independently identifies control ownership.
 11. In A, select one of A's armies at **West camp**, then click **Crossroads**. Its command response should show movement immediately.
@@ -113,14 +148,14 @@ These credentials and HTTP address are for local development. No AWS services ar
 16. Select an army in the Crossroads battle in each client. Verify HP changes in the HUD through focused detail polling
     (approximately every 0.75 seconds). Selecting the opponent's battling army for inspection is allowed.
 17. Change selection while HP polling runs. The newly selected army must not receive the previous army's HP/flags.
-18. Select your own eligible army and click **Retreat Selected** while the battle is still active. Verify both clients observe
+18. Select your own eligible army and click **Retreat** while the battle is still active. Verify both clients observe
     its retreat and eventual arrival. Select an opponent army and confirm Retreat remains disabled even if it can retreat.
 19. If the battle has already ended, send remaining armies from the camps to test another battle in the same Active world.
-20. Use **Refresh** to compare the authoritative snapshot with the displayed map. No periodic full-refresh button use should be
-    needed for movement or normal feed synchronization.
+20. Back to Menu and Continue loads a fresh authoritative snapshot for comparison. Normal movement/feed synchronization
+    requires no refresh action.
 
-The HUD scrolls if the window is small. The map uses the viewport beside it and fits after window resizing;
-clicks inside the HUD are excluded from map input.
+The Canvas scales from 1920x1080. The map fits the authored WorldMapArea after resizing;
+UI graphic raycasts protect map input at the current pointer position.
 
 ## Failure and session checks
 
@@ -143,11 +178,11 @@ clicks inside the HUD are excluded from map input.
 Run each identity in its own local profile as described above. Record only the public match/player IDs, army IDs and join
 code; never record the player token. For editor restarts, stop Play, close/reopen the project, then enter Play again.
 
-A. **Creator:** Create Game, record the join code, match ID, player ID and owned army IDs. Close the client, reopen, and
-click Continue Game. Verify all recorded IDs, code and ownership agree. The map comes from a fresh server snapshot;
+A. **Creator:** Create World, record the join code and visible army IDs. Close the client, reopen, and
+click Continue. Verify all recorded IDs, code and ownership agree. The map comes from a fresh server snapshot;
 Create/Join remain unavailable until explicit Forget. Have B join with the original code to show the second slot remains usable.
 
-B. **Joiner:** Join A's code, record B's match/player/owned army IDs, close and restart B, then Continue. Verify the same
+B. **Joiner:** Join A's code, record B's visible owned army IDs, close and restart B, then Continue. Verify the same
 identity/control and A's unchanged identity. A repeat Join would return match-full; Continue must succeed on that full match.
 
 C. **Moving army:** Move an owned army from its camp to Crossroads, close before the five-second arrival, wait briefly,
@@ -159,8 +194,8 @@ Select an owned battling army and observe HP decrease through the existing ~0.75
 and verify inspection still works while Move/Retreat remain blocked. Close again, let combat finish, then Continue and
 verify authoritative destroyed/surviving armies and cleared battle markers. No continuous HP feed is added.
 
-E. **Backend offline:** Save a valid session, stop the API, restart the client and Continue. Verify a retryable error and
-that Back to Menu still offers Continue. Restart the API and use Retry Load (or Continue after returning to the menu).
+E. **Backend offline:** Save a valid session, stop the API, restart the client and Continue. Verify a retryable Main Menu error
+and retained save. Restart the API and use Retry Load.
 Verify the same identity/owned armies. Also interrupt between successful credential issuance and initial snapshot loading:
 the isolated smoke harness below deliberately stops the API at this boundary and verifies the credential survives restart.
 
@@ -169,12 +204,13 @@ fake token for its own saved credential to provoke 401, and a random match ID wi
 Verify the explanatory “cannot be resumed” message, retained local save and explicit Forget action. Never edit a real player's
 credential for this test and never paste a saved record into a terminal, log or source file.
 
-G. **Forget:** Save a session, click Forget Saved Game, close/restart, and verify Continue is absent and Create/Join are
+G. **Forget:** Save a session, click Forget Saved World, confirm the loss of local access, close/restart, and verify Continue is absent and Create/Join are
 available. Removing the local save does not release the server slot. Create a fresh match when a new slot is needed.
 
-H. **Races:** Begin Continue then immediately Back to Menu; no later map/status may appear. Repeat Continue, Back, Continue;
-the newest snapshot must win. Begin Continue/Refresh then Forget and Create Game; only the new match may appear. Repeat
+H. **Controller harness races:** Begin Continue then immediately Disconnect; no later map/status may appear. Repeat Continue, Back, Continue;
+the newest snapshot must win. Begin Continue/Refresh then Forget and Create World; only the new match may appear. Repeat
 while feed and selected battle detail requests are pending. Cursor, selection, HP and errors must never cross generations.
+Connecting intentionally offers no cancellation button. Native UI races can be exercised with Back to Menu during a World command/resync.
 
 ## Automated built-player recovery smoke
 

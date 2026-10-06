@@ -19,5 +19,7 @@
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/SessionStorage.cs" Link="Client/SessionStorage.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ApiFailure.cs" Link="Client/ApiFailure.cs"/>
         <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ClientMatchLifecycle.cs" Link="Client/ClientMatchLifecycle.cs"/>
+        <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/ClientInputValidation.cs" Link="Client/ClientInputValidation.cs"/>
+        <Compile Include="../../client/ConquestusTerrarumClient/Assets/Scripts/ConquestusTerrarum/UI/UiFlowStateMachine.cs" Link="Client/UiFlowStateMachine.cs"/>
     </ItemGroup>
 </Project>
